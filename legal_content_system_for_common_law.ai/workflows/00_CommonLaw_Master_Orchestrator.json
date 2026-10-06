@@ -1,0 +1,102 @@
+{
+  "name": "WF-00 Common-Law.ai Master Production Orchestrator",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf00-manual-trigger",
+      "name": "Run Master Pipeline Manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, 100]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "wf00-daily-cron",
+      "name": "Daily Morning Master Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 280]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf01-topic-research",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf00-call-wf01",
+      "name": "Run WF-01 Topic Research & Ranking",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [-960, 180]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf02-article-generation",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf00-call-wf02",
+      "name": "Run WF-02 Article & SEO Generation",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [-720, 180]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf05-publishing-queue",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf00-call-wf05",
+      "name": "Run WF-05 Publishing Queue Manager",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [-480, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Master pipeline execution summary\nreturn [{\n  json: {\n    status: 'CYCLE_COMPLETED',\n    pipeline: 'Common-Law.ai Production Content Engine',\n    timestamp: new Date().toISOString(),\n    message: 'Daily legal research, article generation, publishing queue sync, and social syndication check completed.'\n  }\n}];"
+      },
+      "id": "wf00-summary",
+      "name": "Pipeline Cycle Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-240, 180]
+    }
+  ],
+  "connections": {
+    "Run Master Pipeline Manually": {
+      "main": [[{ "node": "Run WF-01 Topic Research & Ranking", "type": "main", "index": 0 }]]
+    },
+    "Daily Morning Master Schedule": {
+      "main": [[{ "node": "Run WF-01 Topic Research & Ranking", "type": "main", "index": 0 }]]
+    },
+    "Run WF-01 Topic Research & Ranking": {
+      "main": [[{ "node": "Run WF-02 Article & SEO Generation", "type": "main", "index": 0 }]]
+    },
+    "Run WF-02 Article & SEO Generation": {
+      "main": [[{ "node": "Run WF-05 Publishing Queue Manager", "type": "main", "index": 0 }]]
+    },
+    "Run WF-05 Publishing Queue Manager": {
+      "main": [[{ "node": "Pipeline Cycle Summary", "type": "main", "index": 0 }]]
+    }
+  }
+}

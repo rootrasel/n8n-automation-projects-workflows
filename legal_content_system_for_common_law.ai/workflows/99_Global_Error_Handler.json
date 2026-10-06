@@ -1,0 +1,47 @@
+{
+  "name": "WF-99 Global Error Handler & Incident Logger",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf99-error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [-1200, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract standardized error details\nconst execution = $execution || {};\nconst workflow = $workflow || {};\nconst error = $json.execution?.error || $json.error || {};\n\nconst errorPayload = {\n  severity: 'HIGH',\n  pipeline: 'common-law.ai Automation',\n  workflowId: workflow.id || 'unknown',\n  workflowName: workflow.name || 'unknown',\n  executionId: execution.id || 'unknown',\n  timestamp: new Date().toISOString(),\n  errorMessage: error.message || 'An unknown error occurred during workflow execution',\n  errorDescription: error.description || '',\n  failedNode: error.node?.name || 'Unknown Node',\n  executionUrl: execution.url || ''\n};\n\nreturn [{\n  json: errorPayload\n}];"
+      },
+      "id": "wf99-format-error",
+      "name": "Format Incident Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-960, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.ALERT_WEBHOOK_URL || 'https://httpbin.org/post'}}",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": \"🚨 **[CRITICAL] Common-Law.ai Pipeline Failure**\",\n  \"embeds\": [\n    {\n      \"title\": \"Workflow Error: {{ $json.workflowName }}\",\n      \"color\": 15158332,\n      \"fields\": [\n        { \"name\": \"Failed Node\", \"value\": \"{{ $json.failedNode }}\", \"inline\": true },\n        { \"name\": \"Execution ID\", \"value\": \"{{ $json.executionId }}\", \"inline\": true },\n        { \"name\": \"Error Message\", \"value\": \"{{ $json.errorMessage }}\" },\n        { \"name\": \"Timestamp\", \"value\": \"{{ $json.timestamp }}\" }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "wf99-send-alert-webhook",
+      "name": "Send Discord/Slack Alert Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-720, 200],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [[{ "node": "Format Incident Details", "type": "main", "index": 0 }]]
+    },
+    "Format Incident Details": {
+      "main": [[{ "node": "Send Discord/Slack Alert Webhook", "type": "main", "index": 0 }]]
+    }
+  }
+}

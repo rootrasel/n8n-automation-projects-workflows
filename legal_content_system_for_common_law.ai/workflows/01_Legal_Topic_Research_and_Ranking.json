@@ -1,0 +1,252 @@
+{
+  "name": "WF-01 Legal Topic Research & Ranking Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "wf01-cron-8am",
+      "name": "Daily 8:00 AM Cron Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 200]
+    },
+    {
+      "parameters": {},
+      "id": "wf01-manual-trigger",
+      "name": "Manual Execution Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, 40]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=legal+news+OR+court+ruling+OR+attorney+lawsuit&hl=en-US&gl=US&ceid=US:en",
+        "options": {}
+      },
+      "id": "wf01-fetch-legal-news",
+      "name": "Fetch Legal News RSS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, -60]
+    },
+    {
+      "parameters": {
+        "url": "https://www.courtlistener.com/api/rest/v4/opinions/?order_by=date_filed%20desc",
+        "options": {}
+      },
+      "id": "wf01-fetch-court-decisions",
+      "name": "Fetch Recent Court Decisions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, 100]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=AI+in+law+OR+artificial+intelligence+legal+developments&hl=en-US&gl=US&ceid=US:en",
+        "options": {}
+      },
+      "id": "wf01-fetch-ai-legal-news",
+      "name": "Fetch AI Legal Developments RSS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, 260]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topic_Bank",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true
+        }
+      },
+      "id": "wf01-read-existing-topics",
+      "name": "Read Existing Topics From Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-960, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all raw inputs into structured candidate items\nconst newsXml = $items('Fetch Legal News RSS')[0]?.json?.data || '';\nconst courtData = $items('Fetch Recent Court Decisions')[0]?.json?.results || [];\nconst aiXml = $items('Fetch AI Legal Developments RSS')[0]?.json?.data || '';\nconst existingTopics = $items('Read Existing Topics From Sheet').map(i => (i.json.title_idea || '').toLowerCase());\n\nconst rawCandidates = [];\n\n// Basic XML Title Extractor for RSS feeds\nfunction extractRssTitles(xmlStr, category) {\n  const regex = /<item>([\\s\\S]*?)<\\/item>/gi;\n  let match;\n  while ((match = regex.exec(xmlStr)) !== null) {\n    const itemContent = match[1];\n    const titleMatch = itemContent.match(/<title><!\\[CDATA\\[(.*?)\\]\\]><\\/title>/i) || itemContent.match(/<title>(.*?)<\\/title>/i);\n    const linkMatch = itemContent.match(/<link>(.*?)<\\/link>/i);\n    if (titleMatch && titleMatch[1]) {\n      rawCandidates.push({\n        rawTitle: titleMatch[1].replace(/&amp;/g, '&'),\n        sourceUrl: linkMatch ? linkMatch[1] : '',\n        category: category\n      });\n    }\n  }\n}\n\nextractRssTitles(newsXml, 'Legal News');\nextractRssTitles(aiXml, 'AI Legal Developments');\n\n// Add court rulings\ncourtData.slice(0, 10).forEach(courtItem => {\n  if (courtItem.case_name || courtItem.plain_text) {\n    rawCandidates.push({\n      rawTitle: courtItem.case_name || 'Recent Federal Court Ruling',\n      sourceUrl: courtItem.absolute_url || '',\n      category: 'Court Decisions'\n    });\n  }\n});\n\n// Deduplicate candidates against existing sheet records\nconst filtered = rawCandidates.filter(c => {\n  const normalized = c.rawTitle.toLowerCase().trim();\n  return !existingTopics.some(existing => existing.includes(normalized) || normalized.includes(existing));\n});\n\nreturn [{\n  json: {\n    totalDiscovered: rawCandidates.length,\n    uniqueCandidates: filtered.slice(0, 20),\n    existingCount: existingTopics.length\n  }\n}];"
+      },
+      "id": "wf01-aggregate-signals",
+      "name": "Aggregate & Deduplicate Signals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-680, 180]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "temperature": 0.4
+        },
+        "prompt": "=You are an expert legal SEO strategist and editor for common-law.ai. \nEvaluate the following candidate legal news, court decisions, and search queries:\n\n{{ JSON.stringify($json.uniqueCandidates) }}\n\nFor each promising topic:\n1. Transform it into an authoritative consumer-facing legal guide title.\n2. Identify the target US State (or 'Federal' / 'General Common Law').\n3. Identify Practice Area (e.g., 'Estate Planning', 'Family Law', 'Corporate / LLC', 'Criminal Defense', 'Personal Injury', 'Employment Law', 'AI Law').\n4. Determine the primary high-volume search keyword.\n5. Score its commercial/search relevance from 1 to 100.\n6. Select ONLY topics with a score >= 70.\n\nRespond ONLY with a valid JSON array of objects with the exact keys:\n[\n  {\n    \"title_idea\": \"What Happens If Someone Dies Without a Will in Texas?\",\n    \"primary_keyword\": \"dying without a will texas intestate succession\",\n    \"target_state\": \"Texas\",\n    \"practice_area\": \"Estate Planning\",\n    \"source_type\": \"search_volume\",\n    \"relevance_score\": 92,\n    \"notes\": \"High consumer search volume and directly matches our Texas attorney directory filter.\"\n  }\n]"
+      },
+      "id": "wf01-openai-rank-topics",
+      "name": "AI Evaluate & Score Topics",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [-440, 180],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-commonlaw-creds",
+          "name": "OpenAI CommonLaw API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse OpenAI JSON array and generate unique IDs\nconst rawOutput = $json.message?.content || $json.text || '';\nlet parsed = [];\n\ntry {\n  const cleaned = rawOutput.replace(/```json/g, '').replace(/```/g, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  parsed = [];\n}\n\nif (!Array.isArray(parsed)) {\n  parsed = [];\n}\n\nconst now = new Date().toISOString();\nconst results = parsed.map((item, index) => {\n  return {\n    json: {\n      topic_id: `TOPIC-${Date.now()}-${index + 1}`,\n      title_idea: item.title_idea || 'Untitled Legal Topic',\n      primary_keyword: item.primary_keyword || '',\n      target_state: item.target_state || 'Federal',\n      practice_area: item.practice_area || 'General Law',\n      source_type: item.source_type || 'news',\n      relevance_score: Number(item.relevance_score) || 75,\n      status: 'NEW',\n      suggested_date: now.split('T')[0],\n      notes: item.notes || 'Automated research discovery',\n      created_at: now\n    }\n  };\n});\n\nreturn results.length > 0 ? results : [{\n  json: {\n    status: 'NO_NEW_TOPICS_ABOVE_THRESHOLD',\n    timestamp: now\n  }\n}];"
+      },
+      "id": "wf01-parse-scored-topics",
+      "name": "Format Scored Topics for Storage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-200, 180]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-topics",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "NEW",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf01-if-valid-topics",
+      "name": "IF Valid Topics Generated",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [40, 180]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topic_Bank",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "wf01-append-to-sheets",
+      "name": "Save Ranked Topics to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [280, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf02-article-generation",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf01-trigger-article-pipeline",
+      "name": "Trigger Next: WF-02 Article Pipeline",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [520, 100]
+    }
+  ],
+  "connections": {
+    "Daily 8:00 AM Cron Trigger": {
+      "main": [
+        [
+          { "node": "Fetch Legal News RSS", "type": "main", "index": 0 },
+          { "node": "Fetch Recent Court Decisions", "type": "main", "index": 0 },
+          { "node": "Fetch AI Legal Developments RSS", "type": "main", "index": 0 },
+          { "node": "Read Existing Topics From Sheet", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Manual Execution Trigger": {
+      "main": [
+        [
+          { "node": "Fetch Legal News RSS", "type": "main", "index": 0 },
+          { "node": "Fetch Recent Court Decisions", "type": "main", "index": 0 },
+          { "node": "Fetch AI Legal Developments RSS", "type": "main", "index": 0 },
+          { "node": "Read Existing Topics From Sheet", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch Legal News RSS": {
+      "main": [[{ "node": "Aggregate & Deduplicate Signals", "type": "main", "index": 0 }]]
+    },
+    "Fetch Recent Court Decisions": {
+      "main": [[{ "node": "Aggregate & Deduplicate Signals", "type": "main", "index": 0 }]]
+    },
+    "Fetch AI Legal Developments RSS": {
+      "main": [[{ "node": "Aggregate & Deduplicate Signals", "type": "main", "index": 0 }]]
+    },
+    "Read Existing Topics From Sheet": {
+      "main": [[{ "node": "Aggregate & Deduplicate Signals", "type": "main", "index": 0 }]]
+    },
+    "Aggregate & Deduplicate Signals": {
+      "main": [[{ "node": "AI Evaluate & Score Topics", "type": "main", "index": 0 }]]
+    },
+    "AI Evaluate & Score Topics": {
+      "main": [[{ "node": "Format Scored Topics for Storage", "type": "main", "index": 0 }]]
+    },
+    "Format Scored Topics for Storage": {
+      "main": [[{ "node": "IF Valid Topics Generated", "type": "main", "index": 0 }]]
+    },
+    "IF Valid Topics Generated": {
+      "main": [
+        [{ "node": "Save Ranked Topics to Google Sheets", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Save Ranked Topics to Google Sheets": {
+      "main": [[{ "node": "Trigger Next: WF-02 Article Pipeline", "type": "main", "index": 0 }]]
+    }
+  }
+}

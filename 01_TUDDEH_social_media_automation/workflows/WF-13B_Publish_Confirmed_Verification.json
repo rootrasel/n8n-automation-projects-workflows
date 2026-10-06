@@ -1,0 +1,409 @@
+{
+  "name": "WF-13B Publish Confirmed to Verified Published State",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "wf13b-trigger-interval",
+      "name": "Poll Interval (Every 10m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 100]
+    },
+    {
+      "parameters": {},
+      "id": "wf13b-trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, -60]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "wf13b-read-queue",
+      "name": "Read Marketing Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-980, 40],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter rows where human confirmed live publishing\nconst rows = $input.all().map(i => i.json);\nconst confirmedRows = rows.filter(r => {\n  const s = String(r['Scheduling Status'] || '').trim();\n  const url = String(r['Published URL'] || '').trim();\n  return s === 'Publish Confirmed' && url.startsWith('http');\n});\n\nreturn confirmedRows.map(r => ({ json: r }));"
+      },
+      "id": "wf13b-filter-confirmed",
+      "name": "Filter Publish Confirmed Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-740, 40]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "wf13b-split-rows",
+      "name": "One Confirmed Job At A Time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [-520, 40]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_content_jobs",
+          "mode": "id"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "field": "marketing_job",
+              "operator": "equals",
+              "value": "={{ $json['Marketing Job'] }}"
+            }
+          ]
+        }
+      },
+      "id": "wf13b-get-job",
+      "name": "Lookup Job Record in Data Table",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-300, 40],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate Scheduled state and prepare Drive move to 06 Published Content/[YYYY-MM]/[Business]\nconst row = $('One Confirmed Job At A Time').first().json;\nconst job = $input.item?.json || {};\n\nlet canPublish = true;\nlet reason = '';\n\nif (!job.internal_job_id) {\n  canPublish = false;\n  reason = 'Internal job record missing.';\n} else if (job.scheduling_status !== 'Scheduled' && job.scheduling_status !== 'Publish Confirmed') {\n  canPublish = false;\n  reason = `Job status is '${job.scheduling_status}', expected 'Scheduled'.`;\n} else if (!job.drive_approved_folder_id) {\n  canPublish = false;\n  reason = 'Missing package Drive ID.';\n}\n\nconst now = new Date();\nconst yyyyMm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;\nconst publishDate = now.toISOString().split('T')[0];\n\nconst masterPublishedParentId = $env.DRIVE_06_PUBLISHED_FOLDER_ID || '06_PUBLISHED_MASTER_ID';\n\nreturn [{\n  json: {\n    ...row,\n    internal_job_id: job.internal_job_id,\n    drive_approved_folder_id: job.drive_approved_folder_id,\n    can_publish: canPublish,\n    reason: reason,\n    destination_parent_id: masterPublishedParentId,\n    yyyy_mm: yyyyMm,\n    publish_date: publishDate,\n    destination_type: row['Destination Type'] || 'Instagram, Facebook'\n  }\n}];"
+      },
+      "id": "wf13b-verify-eligibility",
+      "name": "Verify Eligibility for Published State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-80, 40]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-can-pub",
+              "leftValue": "={{ $json.can_publish }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf13b-if-eligible",
+      "name": "IF Eligible to Publish",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [140, 40]
+    },
+    {
+      "parameters": {
+        "resource": "fileOrFolder",
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.drive_approved_folder_id }}",
+          "mode": "id"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.destination_parent_id }}",
+          "mode": "id"
+        }
+      },
+      "id": "wf13b-move-folder-to-published",
+      "name": "Move Package to 06 Published",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [360, -40],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "googleDriveOAuth2Api",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify move to Published Content\nconst prep = $('Verify Eligibility for Published State').first().json;\nconst movedFolder = $input.item.json;\nconst isMoved = movedFolder.id === prep.drive_approved_folder_id;\n\nreturn [{\n  json: {\n    ...prep,\n    move_verified: isMoved\n  }\n}];"
+      },
+      "id": "wf13b-verify-move",
+      "name": "Verify Move to Published Succeeded",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [580, -40]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-move-ok",
+              "leftValue": "={{ $json.move_verified }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf13b-if-move-ok",
+      "name": "IF Published Move Verified",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [800, -40]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_content_jobs",
+          "mode": "id"
+        },
+        "matchColumns": ["internal_job_id"],
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "internal_job_id": "={{ $json.internal_job_id }}",
+            "current_drive_location": "06 Published Content",
+            "scheduling_status": "Published",
+            "updatedAt": "={{ $now.toISOString() }}"
+          }
+        }
+      },
+      "id": "wf13b-update-datatable-published",
+      "name": "Update Data Table = Published",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [1020, -100]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Marketing Job",
+        "valueToMatchOn": "={{ $json['Marketing Job'] }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Scheduling Status",
+              "fieldValue": "Published"
+            }
+          ]
+        }
+      },
+      "id": "wf13b-update-sheet-published",
+      "name": "Update Sheet: Scheduling Status = Published",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1240, -100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Multi-Platform Performance Row Generation\n// Rule 9: If published to Instagram and Facebook, create TWO separate rows (never combine!)\nconst job = $('Verify Eligibility for Published State').first().json;\n\nconst rawDest = String(job.destination_type || 'Instagram, Facebook');\nconst platforms = [];\n\nif (/instagram/i.test(rawDest)) platforms.push('Instagram');\nif (/facebook/i.test(rawDest)) platforms.push('Facebook');\nif (/tiktok/i.test(rawDest)) platforms.push('TikTok');\nif (platforms.length === 0) platforms.push('Instagram'); // Default\n\nconst performanceRows = platforms.map(platform => ({\n  Business: job.Business,\n  'Content Focus': job['Content Focus'] || '',\n  'Selected Listing': job['Selected Listing'] || '',\n  'Content Format': job['Content Format'] || '',\n  Platform: platform,\n  'Publish Date': job.publish_date,\n  Reach: '',\n  Engagements: '',\n  'Link Clicks': '',\n  'Goal Achieved': '',\n  'AI Learning': ''\n}));\n\nreturn performanceRows.map(r => ({ json: r }));"
+      },
+      "id": "wf13b-generate-platform-performance-rows",
+      "name": "Split Performance Rows Per Platform",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1460, -100]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Performance",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      },
+      "id": "wf13b-append-performance-rows",
+      "name": "Append to Performance Tab (1 Row Per Platform)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1680, -100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_error_log",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "error_id": "=ERR_MOVE_PUB_{{$now.toMillis()}}",
+            "timestamp": "={{$now.toISOString()}}",
+            "workflow": "WF-13B",
+            "internal_job_id": "={{$json.internal_job_id}}",
+            "business": "={{$json.Business}}",
+            "node": "Move Package to 06 Published",
+            "error_type": "SYSTEM",
+            "error_message": "Drive move to 06 Published failed verification. Leaving Scheduling Status = Publish Confirmed.",
+            "resolved": false
+          }
+        }
+      },
+      "id": "wf13b-log-move-fail",
+      "name": "Log Published Move Failure",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [1020, 40]
+    },
+    {
+      "parameters": {},
+      "id": "wf13b-next-row",
+      "name": "Next Row in Queue",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1900, 40]
+    }
+  ],
+  "connections": {
+    "Poll Interval (Every 10m)": {
+      "main": [[{ "node": "Read Marketing Queue", "type": "main", "index": 0 }]]
+    },
+    "Manual Trigger": {
+      "main": [[{ "node": "Read Marketing Queue", "type": "main", "index": 0 }]]
+    },
+    "Read Marketing Queue": {
+      "main": [[{ "node": "Filter Publish Confirmed Rows", "type": "main", "index": 0 }]]
+    },
+    "Filter Publish Confirmed Rows": {
+      "main": [[{ "node": "One Confirmed Job At A Time", "type": "main", "index": 0 }]]
+    },
+    "One Confirmed Job At A Time": {
+      "main": [
+        [],
+        [{ "node": "Lookup Job Record in Data Table", "type": "main", "index": 0 }]
+      ]
+    },
+    "Lookup Job Record in Data Table": {
+      "main": [[{ "node": "Verify Eligibility for Published State", "type": "main", "index": 0 }]]
+    },
+    "Verify Eligibility for Published State": {
+      "main": [[{ "node": "IF Eligible to Publish", "type": "main", "index": 0 }]]
+    },
+    "IF Eligible to Publish": {
+      "main": [
+        [{ "node": "Move Package to 06 Published", "type": "main", "index": 0 }],
+        [{ "node": "Next Row in Queue", "type": "main", "index": 0 }]
+      ]
+    },
+    "Move Package to 06 Published": {
+      "main": [[{ "node": "Verify Move to Published Succeeded", "type": "main", "index": 0 }]]
+    },
+    "Verify Move to Published Succeeded": {
+      "main": [[{ "node": "IF Published Move Verified", "type": "main", "index": 0 }]]
+    },
+    "IF Published Move Verified": {
+      "main": [
+        [{ "node": "Update Data Table = Published", "type": "main", "index": 0 }],
+        [{ "node": "Log Published Move Failure", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Data Table = Published": {
+      "main": [[{ "node": "Update Sheet: Scheduling Status = Published", "type": "main", "index": 0 }]]
+    },
+    "Update Sheet: Scheduling Status = Published": {
+      "main": [[{ "node": "Split Performance Rows Per Platform", "type": "main", "index": 0 }]]
+    },
+    "Split Performance Rows Per Platform": {
+      "main": [[{ "node": "Append to Performance Tab (1 Row Per Platform)", "type": "main", "index": 0 }]]
+    },
+    "Append to Performance Tab (1 Row Per Platform)": {
+      "main": [[{ "node": "Next Row in Queue", "type": "main", "index": 0 }]]
+    },
+    "Log Published Move Failure": {
+      "main": [[{ "node": "Next Row in Queue", "type": "main", "index": 0 }]]
+    },
+    "Next Row in Queue": {
+      "main": [[{ "node": "One Confirmed Job At A Time", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

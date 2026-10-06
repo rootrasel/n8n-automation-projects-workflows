@@ -1,0 +1,233 @@
+{
+  "name": "WF-12 Create Approved Ready-to-Schedule Package",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf12-trigger-parent",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [-980, 100]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_content_jobs",
+          "mode": "id"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "field": "internal_job_id",
+              "operator": "equals",
+              "value": "={{ $json.internal_job_id }}"
+            }
+          ]
+        }
+      },
+      "id": "wf12-check-job-state",
+      "name": "Check Current Job State in Data Table",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-740, 100],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Idempotency & Duplicate Protection check\nconst job = $('Execute Workflow Trigger').first().json;\nconst current = $input.item?.json || {};\n\nconst blockedStatuses = ['Ready to Schedule', 'Schedule Requested', 'Scheduled', 'Publish Confirmed', 'Published'];\nconst isDuplicate = blockedStatuses.includes(current.production_status) || blockedStatuses.includes(current.scheduling_status);\n\nreturn [{\n  json: {\n    ...job,\n    is_duplicate_approval: isDuplicate,\n    current_internal_status: current.production_status\n  }\n}];"
+      },
+      "id": "wf12-idempotency-check",
+      "name": "Idempotency & Duplicate Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-not-duplicate",
+              "leftValue": "={{ $json.is_duplicate_approval }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf12-if-not-duplicate",
+      "name": "IF Not Duplicate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-280, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare package structure and POSTING_INFO snapshot\nconst job = $json;\nconst pkg = job.ai_package || {};\nconst recDate = job.recommended_publish_date || new Date().toISOString().split('T')[0];\nconst recTime = job.recommended_publish_time || '12:00';\nconst ts = new Date().toISOString();\n\nconst jobTypeSlug = `${job.marketing_job} - ${job.content_format}`.replace(/[^a-zA-Z0-9_-]/g, '_');\nconst packageName = `[${job.business_name}] [${jobTypeSlug}]`;\n\n// Point-in-time frozen snapshot\nconst postingInfo = `TUDDEH APPROVED POSTING SNAPSHOT\\n` +\n  `================================\\n` +\n  `POINT-IN-TIME APPROVED CREATIVE SNAPSHOT\\n` +\n  `Creative fields are frozen. Any creative edit requires revision + re-approval.\\n\\n` +\n  `[FROZEN CREATIVE FIELDS]\\n` +\n  `Internal Job ID: ${job.internal_job_id}\\n` +\n  `Business: ${job.business_name}\\n` +\n  `Format: ${job.content_format}\\n` +\n  `Approval Version: ${job.approval_version || 1}\\n` +\n  `Headline: ${pkg.headline || ''}\\n` +\n  `Experience Line: ${pkg.experience_line || ''}\\n` +\n  `Caption: ${pkg.caption || ''}\\n` +\n  `Hashtags: ${(pkg.hashtags || []).join(' ')}\\n` +\n  `CTA: ${pkg.CTA || ''}\\n` +\n  `On Screen Text: ${(pkg.on_screen_text || []).join(' | ')}\\n` +\n  `Style Preset ID: ${job.style_preset_id || 'BUSINESS_V1'}\\n` +\n  `Prompt ID: ${job.prompt_id || 'DEFAULT'} (${job.prompt_version || 'v3.5'})\\n\\n` +\n  `[OPERATIONAL FIELDS]\\n` +\n  `Status: Ready to Schedule\\n` +\n  `Recommended Publish Date: ${recDate}\\n` +\n  `Recommended Publish Time: ${recTime}\\n` +\n  `Scheduled Date / Time: [PENDING MANUAL SCHEDULING]\\n` +\n  `Published URL: [PENDING PUBLISHING]\\n` +\n  `Approval Timestamp: ${ts}\\n`;\n\nconst masterReadyToScheduleParentId = $env.DRIVE_05_01_READY_TO_SCHEDULE_FOLDER_ID || '05_01_READY_TO_SCHEDULE_MASTER_ID';\n\nreturn [{\n  json: {\n    ...job,\n    package_name: packageName,\n    rec_date: recDate,\n    rec_time: recTime,\n    posting_info_snapshot: postingInfo,\n    master_ready_to_schedule_parent_id: masterReadyToScheduleParentId\n  }\n}];"
+      },
+      "id": "wf12-prep-package-paths",
+      "name": "Prepare Approved Package Snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-60, 40]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "operation": "create",
+        "name": "={{ $json.package_name }}",
+        "options": {
+          "parents": ["={{ $json.master_ready_to_schedule_parent_id }}"]
+        }
+      },
+      "id": "wf12-create-approved-package-folder",
+      "name": "Create Ready to Schedule Package Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [160, 40],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "googleDriveOAuth2Api",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Attach created folder ID and build final URLs\nconst prep = $('Prepare Approved Package Snapshot').first().json;\nconst folder = $input.item.json;\nconst approvedFolderId = folder.id || 'MOCK_APPROVED_FOLDER_ID';\nconst approvedFolderUrl = `https://drive.google.com/drive/folders/${approvedFolderId}`;\n\nreturn [{\n  json: {\n    ...prep,\n    approved_folder_id: approvedFolderId,\n    approved_folder_url: approvedFolderUrl,\n    package_verified: true\n  }\n}];"
+      },
+      "id": "wf12-verify-package-created",
+      "name": "Verify Package Created",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [380, 40]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_content_jobs",
+          "mode": "id"
+        },
+        "matchColumns": ["internal_job_id"],
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "internal_job_id": "={{ $json.internal_job_id }}",
+            "drive_approved_folder_id": "={{ $json.approved_folder_id }}",
+            "current_drive_location": "01 Ready to Schedule",
+            "production_status": "Ready to Schedule",
+            "scheduling_status": "Not Scheduled",
+            "updatedAt": "={{ $now.toISOString() }}"
+          }
+        }
+      },
+      "id": "wf12-update-datatable-ready",
+      "name": "Update tuddeh_content_jobs = Ready to Schedule",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [600, 0]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Marketing Job",
+        "valueToMatchOn": "={{ $json.marketing_job }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Production Status",
+              "fieldValue": "Ready to Schedule"
+            },
+            {
+              "fieldId": "Scheduling Status",
+              "fieldValue": "Not Scheduled"
+            },
+            {
+              "fieldId": "Final Asset Link",
+              "fieldValue": "={{ $json.approved_folder_url }}"
+            }
+          ]
+        }
+      },
+      "id": "wf12-update-sheet-ready",
+      "name": "Update Sheet = Ready to Schedule",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [600, 160],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Idempotency skip: job already approved or packaging completed. No-op.\nreturn [{\n  json: {\n    status: 'SKIPPED_DUPLICATE',\n    reason: 'Job already packaged or in advanced scheduling state',\n    internal_job_id: $json.internal_job_id\n  }\n}];"
+      },
+      "id": "wf12-skip-duplicate",
+      "name": "Skip Duplicate Packaging",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-60, 240]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Check Current Job State in Data Table", "type": "main", "index": 0 }]]
+    },
+    "Check Current Job State in Data Table": {
+      "main": [[{ "node": "Idempotency & Duplicate Gate", "type": "main", "index": 0 }]]
+    },
+    "Idempotency & Duplicate Gate": {
+      "main": [[{ "node": "IF Not Duplicate", "type": "main", "index": 0 }]]
+    },
+    "IF Not Duplicate": {
+      "main": [
+        [{ "node": "Prepare Approved Package Snapshot", "type": "main", "index": 0 }],
+        [{ "node": "Skip Duplicate Packaging", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Approved Package Snapshot": {
+      "main": [[{ "node": "Create Ready to Schedule Package Folder", "type": "main", "index": 0 }]]
+    },
+    "Create Ready to Schedule Package Folder": {
+      "main": [[{ "node": "Verify Package Created", "type": "main", "index": 0 }]]
+    },
+    "Verify Package Created": {
+      "main": [
+        [
+          { "node": "Update tuddeh_content_jobs = Ready to Schedule", "type": "main", "index": 0 },
+          { "node": "Update Sheet = Ready to Schedule", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

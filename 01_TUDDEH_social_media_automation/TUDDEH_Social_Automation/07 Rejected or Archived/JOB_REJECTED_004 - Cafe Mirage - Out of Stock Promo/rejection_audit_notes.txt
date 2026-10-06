@@ -1,0 +1,5 @@
+REJECTION AUDIT:
+Job ID: JOB_REJECTED_004
+Date: 2026-09-18
+Reviewer Decision: REJECTED
+Reason: Promoted specialty cold foam syrup is temporarily out of stock from distributor. Content retired.

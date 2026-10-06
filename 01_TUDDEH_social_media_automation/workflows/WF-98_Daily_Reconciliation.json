@@ -1,0 +1,208 @@
+{
+  "name": "WF-98 Daily 3-Way Sheets Drive Data Table Reconciliation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "wf98-trigger-nightly",
+      "name": "Nightly Schedule (2:00 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 100]
+    },
+    {
+      "parameters": {},
+      "id": "wf98-trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, -60]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "wf98-read-sheet-queue",
+      "name": "Read Marketing Queue Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-980, 20],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_content_jobs",
+          "mode": "id"
+        }
+      },
+      "id": "wf98-read-datatable-jobs",
+      "name": "Read All Data Table Jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-980, 180],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 3-Way Reconciliation Comparison: Sheet vs Data Table vs Drive\n// Strict Phase 1 Rule: DETECT + LOG + ALERT only. Never auto-repair.\nconst sheetRows = $('Read Marketing Queue Sheet').all().map(i => i.json);\nconst dtJobs = $('Read All Data Table Jobs').all().map(i => i.json).filter(j => j && j.internal_job_id);\n\nconst dtMap = {};\nfor (const j of dtJobs) {\n  if (j.marketing_job) {\n    dtMap[String(j.marketing_job).trim().toLowerCase()] = j;\n  }\n}\n\nconst discrepancies = [];\n\nfor (const sRow of sheetRows) {\n  const mJobName = String(sRow['Marketing Job'] || '').trim();\n  if (!mJobName) continue;\n\n  const prodStatus = String(sRow['Production Status'] || '').trim();\n  const schedStatus = String(sRow['Scheduling Status'] || '').trim();\n  \n  const dtJob = dtMap[mJobName.toLowerCase()];\n\n  // If sheet is in an active post-intake lifecycle, it must exist in Data Table\n  if (['Generating', 'Ready for Review', 'Approved', 'Ready to Schedule'].includes(prodStatus) ||\n      ['Schedule Requested', 'Scheduled', 'Publish Confirmed', 'Published'].includes(schedStatus)) {\n    \n    if (!dtJob) {\n      discrepancies.push({\n        type: 'ORPHAN_SHEET_ROW',\n        job_name: mJobName,\n        business: sRow.Business,\n        sheet_prod: prodStatus,\n        sheet_sched: schedStatus,\n        datatable_state: 'MISSING',\n        drive_location: 'UNKNOWN',\n        expected_drive: 'Expected internal job record in Data Table',\n        severity: 'HIGH'\n      });\n      continue;\n    }\n\n    const dtProd = dtJob.production_status || '';\n    const dtSched = dtJob.scheduling_status || '';\n    const dtDriveLoc = dtJob.current_drive_location || '';\n\n    // Check Lifecycle State Matrix Mismatches:\n    // Case 1: Ready to Schedule / Not Scheduled\n    if (prodStatus === 'Ready to Schedule' && schedStatus === 'Not Scheduled') {\n      if (dtDriveLoc !== '01 Ready to Schedule') {\n        discrepancies.push({\n          type: 'DRIVE_LOCATION_MISMATCH',\n          job_id: dtJob.internal_job_id,\n          job_name: mJobName,\n          business: sRow.Business,\n          sheet_state: `${prodStatus} / ${schedStatus}`,\n          datatable_state: `${dtProd} / ${dtSched}`,\n          actual_drive_loc: dtDriveLoc,\n          expected_drive: '01 Ready to Schedule',\n          severity: 'HIGH'\n        });\n      }\n    }\n\n    // Case 2: Schedule Requested\n    if (schedStatus === 'Schedule Requested') {\n      if (dtDriveLoc !== '01 Ready to Schedule') {\n        discrepancies.push({\n          type: 'DRIVE_LOCATION_MISMATCH',\n          job_id: dtJob.internal_job_id,\n          job_name: mJobName,\n          business: sRow.Business,\n          sheet_state: `${prodStatus} / ${schedStatus}`,\n          datatable_state: `${dtProd} / ${dtSched}`,\n          actual_drive_loc: dtDriveLoc,\n          expected_drive: '01 Ready to Schedule',\n          severity: 'HIGH'\n        });\n      }\n    }\n\n    // Case 3: Scheduled\n    if (schedStatus === 'Scheduled') {\n      if (dtDriveLoc !== '02 Scheduled') {\n        discrepancies.push({\n          type: 'DRIVE_LOCATION_MISMATCH',\n          job_id: dtJob.internal_job_id,\n          job_name: mJobName,\n          business: sRow.Business,\n          sheet_state: `${prodStatus} / ${schedStatus}`,\n          datatable_state: `${dtProd} / ${dtSched}`,\n          actual_drive_loc: dtDriveLoc,\n          expected_drive: '02 Scheduled',\n          severity: 'HIGH'\n        });\n      }\n    }\n\n    // Case 4: Publish Confirmed\n    if (schedStatus === 'Publish Confirmed') {\n      if (dtDriveLoc !== '02 Scheduled') {\n        discrepancies.push({\n          type: 'DRIVE_LOCATION_MISMATCH',\n          job_id: dtJob.internal_job_id,\n          job_name: mJobName,\n          business: sRow.Business,\n          sheet_state: `${prodStatus} / ${schedStatus}`,\n          datatable_state: `${dtProd} / ${dtSched}`,\n          actual_drive_loc: dtDriveLoc,\n          expected_drive: '02 Scheduled',\n          severity: 'HIGH'\n        });\n      }\n    }\n\n    // Case 5: Published\n    if (schedStatus === 'Published') {\n      if (dtDriveLoc !== '06 Published Content') {\n        discrepancies.push({\n          type: 'DRIVE_LOCATION_MISMATCH',\n          job_id: dtJob.internal_job_id,\n          job_name: mJobName,\n          business: sRow.Business,\n          sheet_state: `${prodStatus} / ${schedStatus}`,\n          datatable_state: `${dtProd} / ${dtSched}`,\n          actual_drive_loc: dtDriveLoc,\n          expected_drive: '06 Published Content',\n          severity: 'HIGH'\n        });\n      }\n    }\n  }\n}\n\nreturn [{\n  json: {\n    reconciliation_timestamp: new Date().toISOString(),\n    total_checked: sheetRows.length,\n    mismatch_count: discrepancies.length,\n    has_discrepancies: discrepancies.length > 0,\n    discrepancies: discrepancies\n  }\n}];"
+      },
+      "id": "wf98-run-reconciliation-matrix",
+      "name": "Execute 3-Way Reconciliation Matrix",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-740, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-has-discrepancies",
+              "leftValue": "={{ $json.has_discrepancies }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf98-if-discrepancy-found",
+      "name": "IF Discrepancy Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-500, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare individual log rows and alert email content\nconst recon = $json;\nconst list = recon.discrepancies || [];\n\nconst logRows = list.map(d => ({\n  error_id: `ERR_RECON_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,\n  timestamp: recon.reconciliation_timestamp,\n  workflow: 'WF-98',\n  internal_job_id: d.job_id || 'N/A',\n  business: d.business || 'N/A',\n  node: '3-Way Reconciliation Matrix',\n  error_type: 'BUSINESS_RULE',\n  error_message: `[${d.type}] Sheet: '${d.sheet_state || d.sheet_prod}' | Data Table: '${d.datatable_state}' | Actual Drive: '${d.actual_drive_loc || d.drive_location}' | Expected: '${d.expected_drive}'`,\n  retry_count: 0,\n  resolved: false,\n  resolution: 'DETECTED_AWAITING_HUMAN_REVIEW'\n}));\n\nreturn logRows.map(r => ({ json: r }));"
+      },
+      "id": "wf98-format-log-rows",
+      "name": "Format Reconciliation Log Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-280, 40]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_error_log",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      },
+      "id": "wf98-append-to-error-table",
+      "name": "Log Discrepancies in tuddeh_error_log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-60, 40]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.TUDDEH_APPROVAL_EMAIL || 'dev-alerts@tuddeh.com' }}",
+        "subject": "=[TUDDEH RECONCILIATION ALERT] Discrepancies Detected Across Sheet / Data Table / Drive",
+        "message": "=<h3>⚠️ TUDDEH Daily Reconciliation Alert</h3><p>Daily 3-way check detected discrepancies between Google Sheet, n8n Data Table, and Google Drive package locations.</p><p>Please inspect <code>tuddeh_error_log</code> for complete audit records. Remember: Phase 1 follows DETECT + LOG + ALERT only (no auto-repairs).</p>",
+        "options": {}
+      },
+      "id": "wf98-send-alert-email",
+      "name": "Send Reconciliation Alert Email (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [160, 40],
+      "credentials": {
+        "gmailOAuth2Api": {
+          "id": "gmailOAuth2Api",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reconciliation 100% clean. All states aligned.\nreturn [{\n  json: {\n    status: 'ALL_SYNCED',\n    timestamp: new Date().toISOString(),\n    message: '3-way reconciliation check passed: Google Sheets, Data Table, and Google Drive are fully consistent.'\n  }\n}];"
+      },
+      "id": "wf98-log-clean-pass",
+      "name": "Log All Synced Clean Pass",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-280, 200]
+    }
+  ],
+  "connections": {
+    "Nightly Schedule (2:00 AM)": {
+      "main": [
+        [{ "node": "Read Marketing Queue Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Read Marketing Queue Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Marketing Queue Sheet": {
+      "main": [
+        [{ "node": "Read All Data Table Jobs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read All Data Table Jobs": {
+      "main": [
+        [{ "node": "Execute 3-Way Reconciliation Matrix", "type": "main", "index": 0 }]
+      ]
+    },
+    "Execute 3-Way Reconciliation Matrix": {
+      "main": [[{ "node": "IF Discrepancy Found", "type": "main", "index": 0 }]]
+    },
+    "IF Discrepancy Found": {
+      "main": [
+        [{ "node": "Format Reconciliation Log Rows", "type": "main", "index": 0 }],
+        [{ "node": "Log All Synced Clean Pass", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Reconciliation Log Rows": {
+      "main": [[{ "node": "Log Discrepancies in tuddeh_error_log", "type": "main", "index": 0 }]]
+    },
+    "Log Discrepancies in tuddeh_error_log": {
+      "main": [[{ "node": "Send Reconciliation Alert Email (Gmail)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "prompt_id": "PROMPT_EVENT_V1",
+  "preset_id": "EVENT_V1",
+  "format": "Static Image / Story",
+  "color_palette": {
+    "accent": "#9B5DE5",
+    "headline": "#FFFFFF",
+    "overlay": "#180E29"
+  },
+  "rules": "Atmosphere-first, calendar date card, venue spotlight, limited seating cue."
+}

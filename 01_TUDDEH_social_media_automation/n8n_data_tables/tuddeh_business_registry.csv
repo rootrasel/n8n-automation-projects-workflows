@@ -1,0 +1,2 @@
+id,business_id,business_name,root_drive_id,brand_folder_id,photos_folder_id,videos_folder_id,reference_folder_id,archive_folder_id,folder_url,provisioning_status,createdAt,updatedAt
+1,BIZ_001,Cafe Mirage,1RootFolderMirageId,1BrandMirageId,1PhotosMirageId,1VideosMirageId,1RefMirageId,1ArchiveMirageId,https://drive.google.com/drive/folders/1RootFolderMirageId,COMPLETED,2026-09-08T00:00:00.000Z,2026-09-08T00:00:00.000Z

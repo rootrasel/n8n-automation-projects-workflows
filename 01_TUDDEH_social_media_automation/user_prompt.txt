@@ -1,0 +1,336 @@
+<USER_REQUEST>
+Phase 1 Final Developer Specification v3.5 FINAL
+Simplified 4-Tab Tracker Architecture • Manual Publishing Phase
+SOURCE OF TRUTH: This specification and the accompanying file TUDDEH_Content_Automation_Tracker_v3.4_FINAL_Pause_Control.xlsx supersede all earlier social-media automation workflow and tracker versions.
+1. Phase 1 Objective
+Automate content planning, generation, Reel editing, draft storage, TUDDEH approval, and approved-content packaging. Scheduling and publishing remain manual in Phase 1. The system must make it obvious what is ready to post and must prevent accidental duplicate posting.
+Marketing Queue → Generate → Review → Approve → Ready to Schedule
+Ready to Schedule → human schedules → Schedule Requested → n8n verifies Drive move → Scheduled
+Scheduled → human confirms live → Publish Confirmed → n8n verifies Drive move → Published
+2. Phase 1 Stack
+Function
+System
+Automation
+n8n
+Human control / tracker
+Google Sheets — 4 tabs only
+Assets / operational folders
+Google Drive
+AI decisions + copy
+OpenAI API
+Static image generation/editing
+OpenAI Image API
+Reel editing
+FFmpeg reusable video engine
+Approval
+Gmail
+IG / FB scheduling
+Manual via Meta Business Suite
+TikTok scheduling
+Manual / native
+Technical workflow state
+n8n Data Tables
+
+Do not build in Phase 1: Metricool API publishing, yt-dlp, Canva API, Creatomate, or direct automated social publishing.
+3. Simplified Google Sheets Architecture
+Google Sheets is the human-facing control panel. It must remain simple. Do not add technical workflow/debugging tabs.
+Tab
+Purpose
+Businesses
+Permanent business information, handles, Drive folder, approval information, business Status, and separate Automation Status (Active/Paused) for per-business production control.
+Listings
+Deal/event/listing information used by content creation.
+Marketing Queue
+One row per marketing job; human creative and publishing lifecycle.
+Performance
+Human-readable results and learning only.
+
+
+4. What Lives in n8n Data Tables
+The following must NOT be added to the Google Sheet unless later approved:
+Internal Content ID / job ID and row-to-job mapping
+Approval version and unique approval token
+Google Drive file and folder IDs
+Actual current Drive location
+Processed / duplicate locks and idempotency keys
+Sync / reconciliation state
+Retry counters and retry timestamps
+Workflow error history
+Technical timestamps and execution IDs
+Media usage history needed only by the automation
+• Global automation mode (AUTOMATION_MODE = ACTIVE | PAUSED | MAINTENANCE)
+• Style preset definitions / preset IDs used by static and video generation
+• Recent per-business creative history used for semantic-duplication checks (recent hooks, concepts, angles, and selected assets)
+• Asset usage history / last-used timestamps used for media rotation
+• Prompt ID + prompt version associated with each generated job/asset
+4A. Automation Pause Controls
+Phase 1 must include a global three-state automation control in an n8n Data Table. This is technical/operational state and must not create another Google Sheets tab.
+Global Automation Mode
+Store one centrally managed value in n8n Data Tables: AUTOMATION_MODE = ACTIVE | PAUSED | MAINTENANCE.
+ACTIVE: all Phase 1 workflows operate normally.
+PAUSED: block NEW content-production intake, but allow work already past the intake gate to finish. WF-13A Scheduling Verification, WF-13B Published Verification, WF-15 Daily Ready-to-Schedule Digest, WF-98 Reconciliation, WF-99 Error Handling, and WF-00 business-folder provisioning may continue.
+MAINTENANCE: block new content production and pause non-essential operational workflows while system changes are being made. WF-98 reconciliation and WF-99 error handling remain available as integrity/safety workflows. Do not start new OpenAI/FFmpeg generation while in MAINTENANCE.
+Single Intake-Gate Rule
+Check AUTOMATION_MODE once at WF-01 intake, before internal job registration, locking, or any paid OpenAI/FFmpeg work. Do not add pause checks to every downstream node.
+If PAUSED or MAINTENANCE is activated after a job has already passed the WF-01 intake gate, that in-flight job runs to completion. Do not attempt to interrupt an active OpenAI request, FFmpeg render, Drive save, or approval-package step mid-execution. Rule: finish what has started; block what has not started.
+Per-Business Pause
+The Businesses tab includes a separate human-facing field named Automation Status with values Active | Paused. This field is distinct from the existing business Status field.
+Business Status represents whether the business is an eligible/live business record. Automation Status represents whether NEW social-content jobs may begin for that business.
+At WF-01 intake, after the global AUTOMATION_MODE check and before job registration, check the business's Automation Status. If Automation Status = Paused, gracefully skip the job: do not register/lock it, do not call OpenAI, and do not treat the pause as an error.
+If a business is paused after one of its jobs has already passed WF-01 intake, that in-flight job completes normally. Previously approved, Ready-to-Schedule, Scheduled, Published, Performance, and Drive records remain untouched.
+WF-02 retains the existing validation that the Business exists and Business Status is Active. Automation Status = Paused is NOT a WF-02 validation failure; it is a separate WF-01 intake gate.
+5. Marketing Queue — Exact Human Lifecycle
+Production Status
+Planned → Generating → Ready for Review → Revision Needed → Approved → Ready to Schedule
+Production Status represents the creative lifecycle only.
+Scheduling Status
+Not Scheduled → Schedule Requested → Scheduled → Publish Confirmed → Published
+Scheduling Status represents the manual scheduling/publishing lifecycle only.
+Marketing Queue columns
+Business | Campaign | Content Focus | Selected Listing | Destination Type | Marketing Job |
+Content Format | Prompt Template | Creative Direction | Revision Notes | Production Status |
+Recommended Publish Date | Recommended Publish Time | Scheduling Status |
+Scheduled Date / Time | Published URL | Final Asset Link
+6. Google Drive Structure
+TUDDEH Social Automation/
+  01 Business Assets/[Business]/01 Brand, 02 Photos, 03 Videos, 04 Reference, 05 Archive
+  02 Master Prompts
+  03 Video Assets
+  04 Generated Drafts
+  05 Approved Content/01 Ready to Schedule
+  05 Approved Content/02 Scheduled
+  06 Published Content
+  07 Rejected or Archived
+Human rule: ONLY schedule content found in 05 Approved Content → 01 Ready to Schedule.
+7. Workflow Inventory
+WF-00
+Business folder provisioning
+Workflow
+Purpose
+WF-01
+Marketing Queue trigger / job registration
+WF-02
+Validate marketing job
+WF-03
+Business + listing + media lookup
+WF-04
+Prompt selection
+WF-05
+AI content decision + copy package
+WF-06
+Static image generation
+WF-07
+Reusable FFmpeg Reel engine
+WF-08
+Story / carousel builder
+WF-09
+Save generated draft
+WF-10
+Send TUDDEH approval request
+WF-11
+Approval / revision / rejection controller
+WF-12
+Create approved Ready-to-Schedule package
+WF-13A
+Schedule Requested → verified Scheduled state
+WF-13B
+Publish Confirmed → verified Published state
+WF-15
+Daily Ready-to-Schedule digest
+WF-98
+Daily Sheets/Drive reconciliation
+WF-99
+Global technical error handler
+
+7A. WF-00 — Business Folder Provisioning
+Purpose: automatically create the standardized per-business Google Drive asset structure when a business is added to the automation. The seven master folders and the two Approved Content subfolders already exist and must NOT be recreated by this workflow.
+Trigger
+Run when a business becomes active/eligible for the social-media automation and its existing Businesses-tab Business Drive Folder field is blank or no valid mapped Drive folder ID exists in the n8n Data Table.
+Required logic
+1. Read the business record from the Businesses tab.
+2. Check the n8n Data Table for an existing durable Google Drive business-folder ID.
+3. If a valid mapped folder already exists, do not create another folder. Reuse it and ensure the human-usable folder URL is present in the Businesses tab.
+4. If no mapped folder exists, check under 01 Business Assets for an existing folder already associated with that business before creating anything.
+5. If none exists, create one parent folder named for the business under 01 Business Assets.
+6. Inside that parent folder, create exactly: 01 Brand, 02 Photos, 03 Videos, 04 Reference, and 05 Archive.
+7. Verify that the parent folder and all five required subfolders exist.
+8. Store the parent business-folder ID and required subfolder IDs in the n8n Data Table.
+9. Write the human-usable parent Business Drive Folder URL to the existing Businesses-tab field.
+10. Mark the internal provisioning state complete only after verification succeeds.
+Safeguards
+• Use Google Drive folder IDs as durable internal identifiers. Do not use the business name as the primary identity after provisioning.
+• The workflow must be idempotent: retries, duplicate triggers, or reactivation of a business must not create duplicate folders.
+• A later business-name change must not cause n8n to create a second folder. Continue using the stored Drive folder ID; renaming the folder can be handled separately if desired.
+• If only some subfolders exist, create only the missing required subfolders and then verify the complete structure.
+• If provisioning partially fails, do not treat the business as ready for content generation. Retry temporary failures through WF-99 or alert TUDDEH when human action is required.
+• WF-00 must never create or modify the seven master folders because those are already provisioned.
+8. WF-01 — Marketing Queue Trigger
+1. Poll the Marketing Queue on a short interval (for example every 10 minutes).
+2. For each candidate row, check global AUTOMATION_MODE. If PAUSED or MAINTENANCE, do not start a new production job.
+3. If global mode permits production, resolve the Business record and check Automation Status. If Paused, skip the row gracefully without creating an internal job/lock.
+4. Only when global mode permits production AND business Automation Status = Active, select rows where Production Status = Planned and no internal job lock already exists.
+5. Create/reuse one internal n8n job ID for that Sheet row, store the Sheet-row mapping, and create the idempotency/processing lock.
+6. Change Production Status to Generating only after job registration succeeds, then pass the job to WF-02.
+9. WF-02 — Validation
+Validate the visible Marketing Queue fields and the linked Business/Listing records before any paid AI generation.
+Business exists and is active.
+Marketing Job, Content Format and Prompt Template are usable.
+If Content Focus = Listing, Selected Listing exists and is active/current.
+Required source assets exist for jobs that depend on supplied media.
+The same internal job is not already processing, Ready to Schedule, Scheduled, or Published.
+Validation failure: keep the human-facing row understandable, log the technical error in n8n Data Tables, and send an alert when human action is required.
+Automation Status clarification: WF-02 continues to validate the core Business Status/eligibility. A business-level Automation Status = Paused is handled upstream by WF-01 as a graceful intake skip and must not be logged as a validation error.
+10. WF-03 — Business, Listing and Media Lookup
+Read business details from Businesses, offer/event details from Listings, and approved assets from the business Drive folder. Do not require extra tracker tabs.
+Use the business handles and brand information already stored in Businesses.
+Use Selected Listing when the content is promoting a deal/event/listing.
+Only use assets the workflow is permitted to use.
+Prefer strong, unused/less-used assets where practical; store technical usage history in n8n, not the Sheet.
+Minimum asset-quality branch:
+For Reel jobs, WF-03 must verify that the available video assets are sufficient before rendering. The developer should define a configurable minimum-quality rule (for example: enough usable footage to build the requested duration at acceptable resolution/orientation).
+If the Reel requirement is not met, do NOT force a low-quality Reel. Preferred behavior: (1) use an approved alternate content format only when the Marketing Job permits that fallback; otherwise (2) flag the job for human review with a clear reason such as “Insufficient usable Reel footage.”
+Source asset protection: never overwrite, destructively edit, rename, or replace originals stored in 01 Business Assets/02 Photos or 03 Videos. All edits/renders must create new files in generated-output locations.
+11. WF-04 / WF-05 — Prompt + AI Decision
+Select the named Prompt Template, load the current master prompt, and ask OpenAI for a structured content package.
+headline
+experience_line
+caption
+hashtags
+CTA
+on_screen_text
+selected_assets
+creative_direction
+recommended_publish_date
+recommended_publish_time
+Write the recommended date/time back to the two corresponding Marketing Queue columns. AI may recommend creative choices; n8n enforces permissions, file existence, lifecycle state, and duplicate protection.
+Style Presets — structural requirement
+WF-04 must resolve an approved Style Preset ID in addition to the Prompt Template. Style presets are centrally editable configuration, not free-form AI styling.
+Initial preset families should include at minimum: BUSINESS_V1, DEAL_V1, EVENT_V1, EGIFT_V1, BIRTHDAY_V1, STORY_V1, and CAROUSEL_V1. Additional presets may be added without rebuilding the workflow.
+A preset may control: headline text color, body text color, overlay/panel color, overlay opacity, accent color, CTA background/text treatment, logo treatment, lower-third treatment, border/accent treatment, typography emphasis, and other approved visual rules.
+AI/n8n selects the preset ID based on Content Focus / Prompt Template / content type. AI must not invent arbitrary colors or raw FFmpeg styling commands. The reusable rendering layer applies the selected preset.
+WF-05 semantic-duplication input requirement
+Before the WF-05 OpenAI call, include recent per-business marketing history as context: recently used hooks, concepts, creative angles, promoted listings, content formats, and relevant recent asset usage. This context is used to reduce near-duplicate content even when the Content ID is different.
+WF-05 should avoid unnecessarily repeating the same hook/angle/concept in the recent window unless the Marketing Job explicitly calls for a repost/reuse. This is semantic duplication prevention, separate from lifecycle/idempotency protection.
+12. WF-06 — Static Image Generation
+Use OpenAI Image API for static generation/editing.
+Use the selected TUDDEH master prompt and business/listing inputs.
+Preserve TUDDEH's premium, experience-first, minimal-text creative direction.
+Never overwrite revisions. Store versions under the internal job/content folder.
+Static Style Preset application:
+WF-06 must pass the selected Style Preset into the static-image prompt/construction layer so Deal, Event, Business Spotlight, eGift, Birthday, Story, and other approved types can use intentionally different text/overlay/accent treatments while remaining within TUDDEH brand rules.
+OpenAI Image API remains responsible for AI-generated/edited static creative. FFmpeg may perform utility transformations when needed, but it does not replace the static creative-generation system.
+13. WF-07 — Reusable FFmpeg Reel Engine
+Build one reusable video engine, not one workflow per business.
+Clip selection, trim, reorder and crop
+9:16 conversion
+Text overlays, logo and CTA
+Optional subtitles and music when permitted
+Audio normalization
+Simple transitions
+Cover/thumbnail generation
+Final MP4 export
+Source media comes from Google Drive in Phase 1. yt-dlp is intentionally deferred.
+Video Style Preset application:
+WF-07 must consume the selected Style Preset as structured configuration. The reusable FFmpeg engine may apply the preset to text colors, overlay/panel colors and opacity, CTA treatment, logo treatment, lower thirds, accents, and related video styling.
+n8n/OpenAI decides WHAT the Reel needs and outputs structured editing instructions plus the approved preset ID. The FFmpeg engine determines HOW to execute only the approved modules/presets. Do not execute unrestricted AI-generated shell/FFmpeg commands.
+14. WF-08 / WF-09 — Stories, Carousels and Draft Storage
+Stories: 9:16; use only as many slides as the content needs.
+Carousels: 4:5; typically 3–7 slides, not automatically the maximum.
+Save drafts under 04 Generated Drafts/[Business]/[internal job ID].
+Write the accessible draft/final review link to Final Asset Link only when appropriate for the human reviewer.
+After a successful draft save, set Production Status = Ready for Review.
+metadata.json requirement:
+Every generated asset package must stamp at minimum: internal job ID, Prompt ID, Prompt Version, Style Preset ID, generation/revision version, selected source asset IDs, and generation timestamp. This metadata must remain with the asset through approval/archive so future performance analysis can correlate creative outcomes with prompt/preset versions.
+15. WF-10 / WF-11 — Approval and Revision
+Send the approval request by Gmail with preview, caption, tags, CTA and actions: Approve, Request Revision, Reject.
+Each approval action carries the internal job ID, current approval version and a unique token.
+A stale approval link must never approve a newer revision.
+Request Revision: write human revision notes to Revision Notes, set Production Status = Revision Needed, create a new version, then return to Ready for Review.
+Approve: verify current version, then set Production Status = Approved and call WF-12.
+Reject: archive the draft after the Drive operation succeeds; technical state stays in n8n.
+Approval identity + revision safeguards:
+In addition to job ID, approval token, and approval version checks, WF-11 must validate that the approval action came through the intended/authorized TUDDEH approval path or authorized reviewer identity configured for the workflow. Do not accept an approval solely because a token is syntactically valid.
+Automatic revision cap: allow a maximum of 3 automated revision generations for one job. After the third automated revision, stop auto-regenerating and require explicit human review/decision before any further generation. The cap must prevent runaway image/Reel generation and repeated API spend.
+16. WF-12 — Approved Ready-to-Schedule Package
+Before creating the approved package, perform duplicate protection in n8n Data Tables AND Drive.
+Block if the same internal job/content package is already Ready to Schedule, Schedule Requested, Scheduled, Publish Confirmed, or Published.
+Block if the approved package already exists in Ready to Schedule, Scheduled, or Published Drive locations.
+A duplicate approval click or webhook retry must be idempotent and must not create a second package.
+05 Approved Content/01 Ready to Schedule/[Recommended Date]/[Business]/[Job - Content Type]/
+  FINAL image/video (READY)
+  CAPTION.txt
+  POSTING_INFO.txt
+  metadata.json
+Only after the package exists and is verified: set Production Status = Ready to Schedule, Scheduling Status = Not Scheduled, and write Final Asset Link.
+17. POSTING_INFO.txt — Approved Snapshot
+POSTING_INFO.txt is a point-in-time approved snapshot, not a second source of truth.
+Freeze approved creative fields: headline, caption, hashtags, tags, CTA, platform, creative version and approved asset.
+If an approved creative field changes, require revision + re-approval and create a new approved snapshot.
+Operational fields may be updated without creative reapproval: status, scheduled date/time, published date and published URL.
+18. WF-13A — Schedule Requested → Scheduled
+1. Human schedules the post using Meta Business Suite, TikTok/native tools, or another approved manual scheduler.
+2. Human enters Scheduled Date / Time and changes Scheduling Status to Schedule Requested.
+3. n8n verifies the internal job is currently Ready to Schedule and is not already Scheduled or Published.
+4. Move the approved package from 01 Ready to Schedule to 02 Scheduled.
+5. Verify the destination package exists and the source is no longer the active Ready-to-Schedule package.
+6. Only after verification, change Scheduling Status to Scheduled.
+7. Update operational status/date inside POSTING_INFO.txt if desired.
+If the Drive move fails, leave Scheduling Status = Schedule Requested, log the error in n8n, and alert TUDDEH. Never falsely mark it Scheduled.
+19. WF-13B — Publish Confirmed → Published
+1. After the post is live, human pastes the Published URL and changes Scheduling Status to Publish Confirmed.
+2. n8n verifies the internal job is currently Scheduled and has a Published URL.
+3. Move the package to 06 Published Content/[YYYY-MM]/[Business].
+4. Verify the move.
+5. Only after verification, set Scheduling Status = Published.
+6. Update operational metadata.
+7. Create one Performance row for EACH platform on which the content was published.
+8. Automatically populate each Performance row with Business, Content Focus, Selected Listing, Content Format, Platform, and Publish Date.
+9. If the same content was published to Instagram and Facebook, create two separate Performance rows (one Instagram row and one Facebook row). Never combine platform metrics into one multi-platform row.
+10. Reach, Engagements, Link Clicks, Goal Achieved, and AI Learning remain performance-stage fields. In Phase 1, performance metrics may be entered manually.
+If the move fails, leave Scheduling Status = Publish Confirmed, log the error, and alert TUDDEH.
+20. Intentional Reposting
+Never reset a Published internal job. An intentional repost is a new Marketing Queue job and receives a new internal n8n job/content ID. n8n may store the original job ID as a technical source reference.
+21. WF-15 — Daily Ready-to-Schedule Digest
+Run each morning. Query Marketing Queue where Production Status = Ready to Schedule and Scheduling Status = Not Scheduled.
+If zero items: send no email.
+If items exist: send a compact list with Business, Campaign/Job, format, recommended date/time and Final Asset Link.
+Include a link to the 01 Ready to Schedule Drive folder.
+22. WF-98 — Daily Reconciliation
+WF-98 is a three-way integrity check across the human-facing Google Sheet, the n8n Data Table internal job record, and the actual Google Drive package location. Reconciliation results belong in n8n Data Tables, not in a new Google Sheets column or tab.
+Human Sheet State
+Expected Drive State
+Production = Ready to Schedule; Scheduling = Not Scheduled
+05 Approved Content/01 Ready to Schedule
+Scheduling = Schedule Requested
+05 Approved Content/01 Ready to Schedule until move commits
+Scheduling = Scheduled
+05 Approved Content/02 Scheduled
+Scheduling = Publish Confirmed
+05 Approved Content/02 Scheduled until move commits
+Scheduling = Published
+06 Published Content
+
+If Sheet state and actual Drive location disagree: detect → log → alert. Do not auto-repair in Phase 1.
+WF-98 must compare, for every active internal job:
+1. Google Sheet lifecycle state: Production Status + Scheduling Status for the mapped Marketing Queue row.
+2. n8n Data Table state: internal job ID, internal lifecycle state, approval version, processed/idempotency lock, and expected Drive location.
+3. Google Drive state: the actual current folder/location of the approved content package.
+A job is reconciled only when the Sheet state, Data Table state, and actual Drive location agree with the expected lifecycle mapping.
+Examples: Sheet=Scheduled + Data Table=Scheduled + Drive=02 Scheduled → OK. Sheet=Ready to Schedule + Data Table=Scheduled + Drive=02 Scheduled → MISMATCH. Sheet=Scheduled + Data Table=Scheduled + Drive=01 Ready to Schedule → MISMATCH. Sheet=Published + Data Table=Scheduled + Drive=06 Published Content → MISMATCH.
+On any mismatch: store the discrepancy in the n8n reconciliation/error record, include the Sheet state, Data Table state, actual Drive location, expected state/location, and timestamp, then alert TUDDEH when human review is required.
+Phase 1 safety rule: WF-98 is DETECT + LOG + ALERT only. It must not automatically decide which system is authoritative, overwrite the Sheet, rewrite the Data Table lifecycle state, or move Drive content to repair a mismatch.
+This check must also catch manual Sheet edits that disagree with the internal n8n job record even when the Drive folder happens to be correct.
+23. WF-99 — Global Error Handling
+Store technical errors in n8n Data Tables, not a Google Sheet tab.
+error_id, timestamp, workflow, internal_job_id, business, node, error_type,
+error_message, retry_count, resolved, resolution, technical timestamps
+Retry temporary API/network/rate-limit failures up to 2 times with backoff. Do not blindly retry business-rule failures such as missing media, invalid listing data, permission problems, or duplicate lifecycle state.
+
+this is my client requirements, i need to build this n8n automation projects. now you should read carefully and step by step and seperately build these workflow. all requirements you will test internally when is it satisfied properly then you will gimme the json n8n workflow.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-08T08:47:08+06:00.
+</ADDITIONAL_METADATA>
+<USER_SETTINGS_CHANGE>
+The user changed setting `Model Selection` from None to Gemini 3.8 Flash (High). No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name instead of the exact string.
+</USER_SETTINGS_CHANGE>

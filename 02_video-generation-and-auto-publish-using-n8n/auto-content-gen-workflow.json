@@ -1,0 +1,2138 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "daysInterval": 3,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2848,
+        912
+      ],
+      "id": "fa992d92-a7ee-41db-9d57-fda4e2a52aa3",
+      "name": "Run Weekly 2 Times1"
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "engine",
+              "value": "google_maps_contributor_reviews"
+            },
+            {
+              "name": "contributor_id",
+              "value": "103708380786640806564"
+            },
+            {
+              "name": "hl",
+              "value": "en"
+            },
+            {
+              "name": "num",
+              "value": "150"
+            },
+            {
+              "name": "api_key",
+              "value": "819c737a9263c55bc1861b425296a31f64ec38c9c1ffe69ce7a9639f82d9d9c0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2640,
+        912
+      ],
+      "id": "8d8a4a59-60f3-49d8-a126-95924bb5dd11",
+      "name": "Get All Reviews1"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1u4jj8R_9YZAg2DFsrjW16C-TI7dtH9RKEhpdz-vO_fU",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "review-video generation tracking",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1u4jj8R_9YZAg2DFsrjW16C-TI7dtH9RKEhpdz-vO_fU/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -2432,
+        912
+      ],
+      "id": "d3ce43f2-44d4-4a05-abf1-636f92ef7265",
+      "name": "Get Previous Records1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "QInC1JFrmppFVi7Q",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const allReviews = $('Get All Reviews1').first().json.reviews;\nconst loggedRows = $('Get Previous Records1').all();\nconst loggedIds = loggedRows.map(r => r.json.review_id).filter(Boolean);\n\nconst unprocessed = allReviews.filter(r => {\n  if (loggedIds.includes(r.review_id)) return false;\n\n  const hasReviewId = r.review_id && r.review_id !== '';\n  const hasImages = [];\n  const hasTitle = r.place_info?.title && r.place_info.title !== '';\n  const hasAddress = r.place_info?.address && r.place_info.address !== '';\n  const hasDataId = r.place_info?.data_id && r.place_info.data_id !== '';\n\n  return hasReviewId && hasImages && hasTitle && hasAddress && hasDataId;\n});\n\nreturn unprocessed.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2208,
+        912
+      ],
+      "id": "b51a78ed-3e74-4917-8f53-8032d9162334",
+      "name": "Filter Unprocessed Reviews1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn [items[0]];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1984,
+        912
+      ],
+      "id": "846f3d99-df5b-45b4-8682-f17e7a0ff374",
+      "name": "Pick Newest Unprocessed Reviews1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $('Pick Newest Unprocessed Reviews1').first().json;\n// Extract city from address (last meaningful part before country)\nconst addressParts = (r.place_info.address || '').split(',');\nconst city = addressParts.length >= 2 ? addressParts[addressParts.length - 2].trim() : '';\nconst country = addressParts.length >= 1 ? addressParts[addressParts.length - 1].trim() : '';\nreturn [{\n  json: {\n    review_id: r.review_id,\n    restaurant: {\n      name: r.place_info.title,\n      address: r.place_info.address,\n      city: city,\n      country: country,\n      type: r.place_info.type,\n      data_id: r.place_info.data_id,\n      coordinates: r.place_info.gps_coordinates,\n      thumbnail: r.place_info.thumbnail\n    },\n    review: {\n      rating: r.rating,\n      date: r.date,\n      text: r.snippet,\n      text_translated: r.translated_snippet,\n      likes: r.likes,\n      details: r.details || {},\n    },\n    images: $input.all().slice(0, 7).map(item => ({ url: item.json.image }))\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        912
+      ],
+      "id": "f21b2916-db38-4669-9397-0867a1b9ee1c",
+      "name": "Transform Payload to Structured Data1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst { images, meta, restaurant, review, ...rest } = data;\nconst { thumbnail, ...cleanRestaurant } = restaurant;\nconst { rating, date, text_translated, likes, details, owner_response, ...cleanReview } = review;\nreturn [{\n  json: {\n    ...rest,\n    restaurant: cleanRestaurant,\n    review: cleanReview,\n    food_images: images.slice(0, 4).map(img => img.url)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        144
+      ],
+      "id": "334227ee-6ff3-44a6-bb28-e911ea27a966",
+      "name": "Send All Review Images With Metadata"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    female_avatar_image: 'https://res.cloudinary.com/dffrucnde/image/upload/v1778665867/photo_2026-05-13_15-45-45_wljtfs.jpg',\n    male_avatar_image: 'https://res.cloudinary.com/dffrucnde/image/upload/v1778665866/photo_2026-05-13_15-45-52_yejq89.jpg'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        352
+      ],
+      "id": "b0bfe1cc-1c86-44d4-ae39-672ce80a7595",
+      "name": "Set Avatar Image1"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 3,
+        "options": {
+          "includeUnpaired": false
+        }
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2128,
+        768
+      ],
+      "id": "d0897c86-f50f-40d0-8510-b9925e0f8daa",
+      "name": "Merge Multiple Inputs",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const merged = $input.first().json;\n\nfunction sanitize(str) {\n  if (!str) return '';\n  return str\n    .replace(/[\\u{1F000}-\\u{1FFFF}]/gu, '')\n    .replace(/[\\u{1F300}-\\u{1F9FF}]/gu, '')\n    .replace(/[\\u{2600}-\\u{27BF}]/gu, '')\n    .replace(/[\\u{FE00}-\\u{FEFF}]/gu, '')\n    .replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]/g, '')\n    .replace(/\\n/g, ' ').replace(/\\r/g, '').replace(/\\t/g, ' ')\n    .trim();\n}\n\nreturn [{\n  json: {\n    restaurantName: sanitize(merged.restaurant?.name || 'el restaurante'),\n    restaurantType: sanitize(merged.restaurant?.type || 'restaurante'),\n    restaurantAddress: sanitize(merged.restaurant?.address || ''),\n    restaurantCity: sanitize(merged.restaurant?.city || ''),\n    restaurantCountry: sanitize(merged.restaurant?.country || ''),\n    reviewText: sanitize(merged.review?.text || ''),\n    foodImages: merged.food_images || [],\n    insideImage: merged.inside_image_url || '',\n    maleAvatarImage: merged.male_avatar_image || '',\n    femaleAvatarImage: merged.female_avatar_image || '',\n    review_id: merged.review_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2336,
+        784
+      ],
+      "id": "5280b4d0-ef84-48a7-9b52-0557b7b22898",
+      "name": "Prepare Data for Script"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.x.ai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'grok-4-1-fast-non-reasoning', max_tokens: 900, response_format: { type: 'json_object' }, messages: [ { role: 'system', content: 'Eres un guionista creativo para videos virales sobre restaurantes. Escribe dialogos cortos en espanol entre DOS personas. ESCENA1: sentados adentro. ESCENA2A: waiter sirve. ESCENA2B: reaccion al ver comida. ESCENA3A: primera mordida. ESCENA3B: comiendo y conversando. ESCENA4: montaje rapido. persona1 voz masculina profunda. persona2 voz femenina animada. REGLAS IMPORTANTES: (1) Los dialogos deben hablar SOLO sobre la experiencia gastronómica y la comida, NUNCA mencionar el nombre del restaurante ni la direccion. (2) NUNCA mostrar ni mencionar comer conchas de mejillones, conchas de almejas, cascara de limon ni ninguna parte no comestible de los alimentos. Solo las partes comestibles. (3) En la escena final, persona1 dice claramente \"Like\" y persona2 dice claramente \"Sigueme\" o \"Follow me\". Responde SOLO JSON con claves: persona1_scene1, persona2_scene1, persona1_scene3a, persona2_scene3a, persona1_scene3b, persona2_scene3b, hashtags (10-15 en espanol e ingles).' }, { role: 'user', content: 'Restaurante: ' + $json.restaurantName + '. Tipo: ' + $json.restaurantType + '. Resena: ' + $json.reviewText } ] }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2544,
+        784
+      ],
+      "id": "abfe16a4-9e0b-4d37-a5bb-707ff66c73d8",
+      "name": "Generate Spanish Script via xAI"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst content = response.choices[0].message.content;\n\nlet scriptData;\ntry {\n  scriptData = JSON.parse(content);\n} catch(e) {\n  scriptData = JSON.parse(content.replace(/```json|```/g, '').trim());\n}\n\nconst d = $('Prepare Data for Script').first().json;\n\nconst foodImages = d.foodImages || [];\nconst insideImg  = d.insideImage || '';\nconst maleImg    = d.maleAvatarImage || '';\nconst femaleImg  = d.femaleAvatarImage || '';\n\n// Build title in format: RESTAURANT NAME. // CITY COUNTRY\nconst titleDisplay = (d.restaurantName + '. // ' + d.restaurantCity + ' ' + d.restaurantCountry).toUpperCase().trim();\n\nconst masterPromptIntro = 'ULTRA REALISTIC CINEMATIC STYLE. Ultra realistic cinematic restaurant video. Premium movie look. Natural lighting. 24fps cinematic motion. Shallow depth of field. Real-world physics. CRITICAL: Use ONLY the real food photographs provided. NEVER invent dishes or generate fake food. Food must remain physically grounded, realistic, detailed. IMPORTANT: NEVER show eating or holding shells of mussels, clams, oysters, lemon rinds or any inedible food parts - only show edible food portions. Maintain identical avatars across all scenes - same face, hairstyle, age, body proportions, clothing. Hyperrealistic human motion: natural eye blinking (NO eye flickering or glitching), subtle breathing, micro-expressions, lip sync, photorealistic skin. NO fantasy visuals, NO AI glitches, NO face distortion, NO physics breaking. Everything must be grounded in real-world cinematic realism.';\n\nconst motion = 'Ultra-realistic human motion: natural stable eye blinking (absolutely NO eye flickering), subtle breathing, micro-expressions, lip sync, photorealistic skin, cinematic lighting. No robotic movement. No glitching.';\n\n// SCENE 1 - Title overlay with restaurant name, city and location\nconst scene1Prompt = masterPromptIntro + ' SCENE 1 - RESTAURANT INTRO: Title card displayed prominently on screen: \"' + titleDisplay + '\". Cinematic slow pan across the beautiful interior of the restaurant. Soft warm lighting, aesthetic decor, bokeh background with guests dining. Male and Female character seated at a table, listening and smiling, gazing around admiringly. Natural, authentic, elegant. NO street address spoken. ' + motion + ' Vertical 9:16.';\nconst scene1Images = [\n  ...(insideImg  ? [{ url: insideImg  }] : []),\n  ...(maleImg    ? [{ url: maleImg    }] : []),\n  ...(femaleImg  ? [{ url: femaleImg  }] : []),\n  ...(foodImages[0] ? [{ url: foodImages[0] }] : [])\n].slice(0, 4);\n\n// SCENE 2A - Waiter serving\nconst scene2aPrompt = masterPromptIntro + ' SCENE 2A - WAITER SERVING: Professional waiter walks toward the table and places dishes elegantly. Real food from photos, show only edible portions. Male and Female characters look up with excitement. Close-up of hands setting down plates. Natural steam and realistic food detail. ' + motion + ' Vertical 9:16.';\nconst scene2aImages = [\n  ...(insideImg  ? [{ url: insideImg  }] : []),\n  ...(maleImg    ? [{ url: maleImg    }] : []),\n  ...(femaleImg  ? [{ url: femaleImg  }] : []),\n  ...(foodImages[1] ? [{ url: foodImages[1] }] : [])\n].slice(0, 4);\n\n// SCENE 2B - Food reveal\nconst scene2bPrompt = masterPromptIntro + ' SCENE 2B - HYPERREALISTIC FOOD REVEAL: Ultra cinematic food showcase using ONLY the real food photos provided. Show ONLY edible parts of food, never shells or inedible garnishes. Slow motion steam rising, floating spices macro lens, extreme close-up textures, sizzling plate fire sparks, golden sauce drizzle, final beauty shot of all dishes. Dark moody dramatic lighting. Multiple dishes shown. Smooth 360-degree camera rotation. No people. Vertical 9:16.';\nconst scene2bImages = foodImages.slice(0, 4).map(u => ({ url: u }));\n\n// SCENE 3A - First bite reaction\nconst scene3aPrompt = masterPromptIntro + ' SCENE 3A - FIRST BITE REACTION: Male character takes first bite of real edible food (never shells or inedible parts) - eyes light up naturally, slow smile. Cut to Female character takes her bite - covers mouth in amazement, nods enthusiastically. Alternating close-up reaction shots. Warm cinematic lighting. Authentic emotional response. Stable natural eye blinking, absolutely NO eye flickering. ' + motion + ' Vertical 9:16.';\nconst scene3aImages = [\n  ...(foodImages[0] ? [{ url: foodImages[0] }] : []),\n  ...(foodImages[1] ? [{ url: foodImages[1] }] : []),\n  ...(maleImg       ? [{ url: maleImg       }] : []),\n  ...(femaleImg     ? [{ url: femaleImg     }] : [])\n].slice(0, 4);\n\n// SCENE 3B - Eating and talking\nconst scene3bPrompt = masterPromptIntro + ' SCENE 3B - SHARED CONVERSATION: Male and Female characters eating together naturally, laughing, talking, enjoying the real meal. Only edible food visible. Intercut with close-ups: fork lifting edible food from the real plates, juice glistening, hand picking glass. Candid warm documentary style. Stable natural eyes, NO flickering. ' + motion + ' Vertical 9:16.';\nconst scene3bImages = [\n  ...(foodImages[2] ? [{ url: foodImages[2] }] : []),\n  ...(foodImages[3] ? [{ url: foodImages[3] }] : []),\n  ...(maleImg       ? [{ url: maleImg       }] : []),\n  ...(femaleImg     ? [{ url: femaleImg     }] : [])\n].slice(0, 4);\n\n// SCENE 4 - Fast montage with Like/Follow CTA\nconst scene4Prompt = masterPromptIntro + ' SCENE 4 - FAST MONTAGE + CALL TO ACTION: High energy rapid-cut food montage showcasing ALL real photographed dishes (edible parts only). Quick cuts every 1.5 seconds. Vibrant saturated colors, dynamic camera angles. End scene: Male avatar looks directly at camera with stable eyes (NO flickering) and clearly says \"Like\". Then Female avatar looks directly at camera with stable eyes (NO flickering) and clearly says \"Follow me\". Warm smile, natural confident expression. Vertical 9:16.';\nconst scene4Images = [\n  ...foodImages.slice(0, 2).map(u => ({ url: u })),\n  ...(maleImg   ? [{ url: maleImg   }] : []),\n  ...(femaleImg ? [{ url: femaleImg }] : [])\n].slice(0, 4);\n\nconst endingVideoUrl = 'https://res.cloudinary.com/dffrucnde/video/upload/v1778667474/IMG_8823_utt70n.mp4';\nconst backgroundMusicUrl = 'https://res.cloudinary.com/dffrucnde/video/upload/v1778931747/AgusAlvarez_Luke_Bergs_-_The_Feeling_freetouse.com_wdotgq.mp3';\n\nreturn [{\n  json: {\n    review_id: d.review_id,\n    restaurantName: d.restaurantName,\n    restaurantCity: d.restaurantCity,\n    restaurantCountry: d.restaurantCountry,\n    restaurantAddress: d.restaurantAddress,\n    titleDisplay,\n    hashtags: scriptData.hashtags || '',\n    scene1Prompt,   scene1Images,\n    scene2aPrompt,  scene2aImages,\n    scene2bPrompt,  scene2bImages,\n    scene3aPrompt,  scene3aImages,\n    scene3bPrompt,  scene3bImages,\n    scene4Prompt,   scene4Images,\n    endingVideoUrl,\n    backgroundMusicUrl\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2752,
+        880
+      ],
+      "id": "06c82e75-4673-4937-85b8-357dfa081800",
+      "name": "Parse Script & Build Video Prompts"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.x.ai/v1/videos/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'grok-imagine-video', prompt: $('Parse Script & Build Video Prompts').first().json.scene1Prompt, aspect_ratio: '9:16', duration: 8, resolution: '480p', reference_images: $('Parse Script & Build Video Prompts').first().json.scene1Images }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -880,
+        1568
+      ],
+      "id": "3414d162-373a-4ece-a624-562b5f0f9a92",
+      "name": "Generate Scene 1"
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "5f29c8b1-ba2f-4f32-802d-60f34b1d67e1",
+      "name": "Delay 30s after Scene 1",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -464,
+        1568
+      ],
+      "webhookId": "delay-sc1-hook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.x.ai/v1/videos/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'grok-imagine-video', prompt: $('Parse Script & Build Video Prompts').first().json.scene2aPrompt, aspect_ratio: '9:16', duration: 8, resolution: '480p', reference_images: $('Parse Script & Build Video Prompts').first().json.scene2aImages }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -256,
+        1568
+      ],
+      "id": "628fad27-92b0-4ad3-8d7d-bae47dcf4db5",
+      "name": "Generate Scene 2A"
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "6f8e4747-33c2-476e-9318-0c04861ceeef",
+      "name": "Delay 30s after Scene 2A",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -48,
+        1568
+      ],
+      "webhookId": "delay-sc2a-hook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.x.ai/v1/videos/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'grok-imagine-video', prompt: $('Parse Script & Build Video Prompts').first().json.scene2bPrompt, aspect_ratio: '9:16', duration: 10, resolution: '480p', reference_images: $('Parse Script & Build Video Prompts').first().json.scene2bImages }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        160,
+        1568
+      ],
+      "id": "37e483e6-b5f7-41b4-8a03-238e03d7ae7f",
+      "name": "Generate Scene 2B"
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "671169a3-a4d6-40d8-bb24-907a73f20c10",
+      "name": "Delay 30s after Scene 2B",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        384,
+        1568
+      ],
+      "webhookId": "delay-sc2b-hook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.x.ai/v1/videos/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'grok-imagine-video', prompt: $('Parse Script & Build Video Prompts').first().json.scene3aPrompt, aspect_ratio: '9:16', duration: 8, resolution: '480p', reference_images: $('Parse Script & Build Video Prompts').first().json.scene3aImages }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        608,
+        1568
+      ],
+      "id": "57918b6e-93f9-4f45-946b-0ac1d1086f10",
+      "name": "Generate Scene 3A"
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "93bf3574-246f-479c-b4df-5a23a0d95dd6",
+      "name": "Delay 30s after Scene 3A",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        832,
+        1568
+      ],
+      "webhookId": "delay-sc3a-hook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.x.ai/v1/videos/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'grok-imagine-video', prompt: $('Parse Script & Build Video Prompts').first().json.scene3bPrompt, aspect_ratio: '9:16', duration: 8, resolution: '480p', reference_images: $('Parse Script & Build Video Prompts').first().json.scene3bImages }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1056,
+        1568
+      ],
+      "id": "d21a68a1-fa04-496f-9bfe-1e78d06018c6",
+      "name": "Generate Scene 3B"
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "f7c2947c-b5b3-43bf-96d3-c544c7929ddb",
+      "name": "Delay 30s after Scene 3B",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1280,
+        1568
+      ],
+      "webhookId": "delay-sc3b-hook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.x.ai/v1/videos/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'grok-imagine-video', prompt: $('Parse Script & Build Video Prompts').first().json.scene4Prompt, aspect_ratio: '9:16', duration: 10, resolution: '480p', reference_images: $('Parse Script & Build Video Prompts').first().json.scene4Images }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1504,
+        1568
+      ],
+      "id": "9214a841-bb4a-43fd-baa4-49d46ff0fa85",
+      "name": "Generate Scene 4"
+    },
+    {
+      "parameters": {
+        "amount": 200
+      },
+      "id": "874f6ac4-5608-4e2e-8d75-edf06225e177",
+      "name": "Wait Render Scene 1",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1712,
+        1120
+      ],
+      "webhookId": "wait-render-sc1"
+    },
+    {
+      "parameters": {
+        "amount": 200
+      },
+      "id": "4484e01c-6212-4fa2-827c-195795bb0121",
+      "name": "Wait Render Scene 2A",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1712,
+        1296
+      ],
+      "webhookId": "wait-render-sc2a"
+    },
+    {
+      "parameters": {
+        "amount": 200
+      },
+      "id": "b4489d7d-e6ce-4c79-a91a-520feae9b9da",
+      "name": "Wait Render Scene 2B",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1712,
+        1472
+      ],
+      "webhookId": "wait-render-sc2b"
+    },
+    {
+      "parameters": {
+        "amount": 200
+      },
+      "id": "f396f16f-e4b5-4a29-bb11-42dd750f0070",
+      "name": "Wait Render Scene 3A",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1728,
+        1648
+      ],
+      "webhookId": "wait-render-sc3a"
+    },
+    {
+      "parameters": {
+        "amount": 200
+      },
+      "id": "be95bc7f-61d3-4f6b-947e-0695a145cea1",
+      "name": "Wait Render Scene 3B",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1728,
+        1824
+      ],
+      "webhookId": "wait-render-sc3b"
+    },
+    {
+      "parameters": {
+        "amount": 200
+      },
+      "id": "f0a945bd-754c-44a9-8c44-d33bd0890fa6",
+      "name": "Wait Render Scene 4",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1728,
+        2016
+      ],
+      "webhookId": "wait-render-sc4"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.x.ai/v1/videos/{{ $('Generate Scene 1').first().json.request_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2c68100b-1cc7-4f9b-a965-d3794c8f2752",
+      "name": "Check Scene 1 Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1936,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.x.ai/v1/videos/{{ $('Generate Scene 2A').first().json.request_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a8a8cb3b-f518-429a-9a1e-20169d4bc9ab",
+      "name": "Check Scene 2A Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1936,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.x.ai/v1/videos/{{ $('Generate Scene 2B').first().json.request_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c3049a3d-5c81-498d-8c75-325ffbee5ca3",
+      "name": "Check Scene 2B Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1936,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.x.ai/v1/videos/{{ $('Generate Scene 3A').first().json.request_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "83808a36-5643-427a-904f-f4fa46a66e7c",
+      "name": "Check Scene 3A Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1936,
+        1648
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.x.ai/v1/videos/{{ $('Generate Scene 3B').first().json.request_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "985ac7eb-624b-4175-8cd7-ec777a7322bb",
+      "name": "Check Scene 3B Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1936,
+        1824
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.x.ai/v1/videos/{{ $('Generate Scene 4').first().json.request_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "655291b1-507f-45e0-a6f7-80cc8965ead2",
+      "name": "Check Scene 4 Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1936,
+        2016
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 6,
+        "options": {
+          "includeUnpaired": false
+        }
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2160,
+        1504
+      ],
+      "id": "06670ca8-a01c-4408-ac18-331f9e16bf9b",
+      "name": "Wait All Scenes Done",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Parse Script & Build Video Prompts').first().json;\n\nconst sc1  = $('Check Scene 1 Status').first().json.video.url;\nconst sc2a = $('Check Scene 2A Status').first().json.video.url;\nconst sc2b = $('Check Scene 2B Status').first().json.video.url;\nconst sc3a = $('Check Scene 3A Status').first().json.video.url;\nconst sc3b = $('Check Scene 3B Status').first().json.video.url;\nconst sc4  = $('Check Scene 4 Status').first().json.video.url;\n\nconst totalDuration = 60;\n\nreturn [{\n  json: {\n    review_id: d.review_id,\n    timeline: {\n      tracks: [\n        {\n          clips: [\n            { asset: { type: 'video', src: sc1  }, start: 0,  length: 8  },\n            { asset: { type: 'video', src: sc2a }, start: 8,  length: 8  },\n            { asset: { type: 'video', src: sc2b }, start: 16, length: 10 },\n            { asset: { type: 'video', src: sc3a }, start: 26, length: 8  },\n            { asset: { type: 'video', src: sc3b }, start: 34, length: 8  },\n            { asset: { type: 'video', src: sc4  }, start: 42, length: 10 },\n            { asset: { type: 'video', src: d.endingVideoUrl }, start: 52, length: 8 }\n          ]\n        },\n        {\n          clips: [\n            {\n              asset: {\n                type: 'audio',\n                src: d.backgroundMusicUrl,\n                volume: 0.1,\n                trim: 0\n              },\n              start: 0,\n              length: totalDuration,\n              transition: { in: 'fade', out: 'fade' }\n            }\n          ]\n        }\n      ]\n    },\n    output: { format: 'mp4', resolution: 'hd', aspectRatio: '9:16', fps: 30 }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2384,
+        1568
+      ],
+      "id": "1e7dc264-d608-4db7-80c9-56107fcd396d",
+      "name": "Prepare Shotstack Timeline"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.shotstack.io/edit/v1/render",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "8lJi0ssZyQTeP5nA0oIm8iQYCNgPlAINlujyHr4M"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ {\n  timeline: $json.timeline,\n  output: $json.output\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2576,
+        1568
+      ],
+      "id": "70e912a2-4f9d-4d6b-8476-094b16c04e94",
+      "name": "Send to Shotstack"
+    },
+    {
+      "parameters": {
+        "amount": 150
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2816,
+        1568
+      ],
+      "id": "6f08bea1-c0c4-453e-a5b3-f5450c0cd859",
+      "name": "Wait Shotstack Render",
+      "webhookId": "wait-shotstack-hook"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.shotstack.io/edit/v1/render/{{ $('Send to Shotstack').first().json.response.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "8lJi0ssZyQTeP5nA0oIm8iQYCNgPlAINlujyHr4M"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3056,
+        944
+      ],
+      "id": "cb6c1f24-de4f-454c-921a-983bd3eca825",
+      "name": "Check Shotstack Status"
+    },
+    {
+      "parameters": {
+        "jsCode": "const review_id = $('Parse Script & Build Video Prompts').first().json.review_id;\nconst final_video = $input.first().json.response.url;\nreturn [{ json: { review_id, final_video } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3296,
+        944
+      ],
+      "id": "472c9c43-d455-4f76-a9d1-9b69add24832",
+      "name": "Cleanup & Return"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1u4jj8R_9YZAg2DFsrjW16C-TI7dtH9RKEhpdz-vO_fU",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "review-video generation tracking",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1u4jj8R_9YZAg2DFsrjW16C-TI7dtH9RKEhpdz-vO_fU/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "review_id": "={{ $json.review_id }}",
+            "restaurant_name": "={{ $json.restaurant_name }}",
+            "address": "={{ $json.short_address }}",
+            "hashtags": "={{ $('Parse Script & Build Video Prompts').item.json.hashtags }}",
+            "date": "={{ $now.format('MM-dd-yyyy') }}",
+            "reels_thumbnail_link": "={{ $json.reels_url }}",
+            "youtube_thumbnail_link": "={{ $json.youtube_url }}",
+            "status": "Video Generated",
+            "Final_video_link": "={{ $json.final_video }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "review_id",
+              "displayName": "review_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "restaurant_name",
+              "displayName": "restaurant_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "address",
+              "displayName": "address",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "hashtags",
+              "displayName": "hashtags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reels_thumbnail_link",
+              "displayName": "reels_thumbnail_link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "youtube_thumbnail_link",
+              "displayName": "youtube_thumbnail_link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Final_video_link",
+              "displayName": "Final_video_link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3744,
+        928
+      ],
+      "id": "f2b83434-3373-47c9-b58f-e39b37031949",
+      "name": "Log to Google Sheets",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "QInC1JFrmppFVi7Q",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "title",
+              "value": "={{ $json.restaurant_name }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "address",
+              "value": "={{ $json.address.split(',').slice(-2).map(s => s.trim()).join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "hashtags",
+              "value": "={{ $json.hashtags }}",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "video_url",
+              "value": "={{ $json.Final_video_link }}",
+              "type": "string"
+            },
+            {
+              "id": "004d3cf6-e2d2-4711-8df6-5e8e9e4e5046",
+              "name": "youtube_thumbnail",
+              "value": "={{ $('Generate Thumbnails').first().json.youtube_url }}",
+              "type": "string"
+            },
+            {
+              "id": "eea6b68b-4a3c-454d-bbf8-766fc11c0c05",
+              "name": "reels_thumbnail",
+              "value": "={{ $('Generate Thumbnails').first().json.reels_url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3968,
+        928
+      ],
+      "id": "e8b6b153-3082-4f48-9446-50241cf3638f",
+      "name": "Build Publishing Payload"
+    },
+    {
+      "parameters": {
+        "operation": "uploadVideo",
+        "user": "agladiator59",
+        "platform": [
+          "youtube",
+          "instagram",
+          "tiktok"
+        ],
+        "title": "={{ $json.title }}",
+        "firstComment": "=",
+        "instagramTitle": "={{ $json.title }}",
+        "tiktokTitle": "={{ $json.title }}",
+        "youtubeTitle": "={{ $json.title }}",
+        "description": "={{ $json.title}} Review - {{ $json.address }} - {{ $json.hashtags }}",
+        "youtubeDescription": "=",
+        "video": "={{ $json.video_url }}",
+        "tiktokIsAigc": true,
+        "instagramMediaType": "REELS",
+        "instagramCoverUrl": "={{ $json.reels_thumbnail }}",
+        "youtubeTags": "={{ $json.hashtags.replace(/#/g, '').replace(/ /g, ',') }}",
+        "youtubeThumbnail": "={{ $json.youtube_thumbnail }}",
+        "youtubeContainsSyntheticMedia": true
+      },
+      "type": "n8n-nodes-upload-post.uploadPost",
+      "typeVersion": 1,
+      "position": [
+        4192,
+        928
+      ],
+      "id": "2931877a-ea84-4910-b9a7-d7750e178816",
+      "name": "Upload a video",
+      "credentials": {
+        "uploadPostApi": {
+          "id": "uS97ODaLJVg1wzaX",
+          "name": "Upload Post account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const grokResponse = $input.first().json;\nconst insideImageUrl = grokResponse.choices[0].message.content.trim();\n\nconst name = $('Transform Payload to Structured Data1').first().json.restaurant.name;\nconst fullAddress = $('Transform Payload to Structured Data1').first().json.restaurant.address;\nconst addressParts = fullAddress.split(',');\nconst shortAddress = addressParts.slice(-2).map(s => s.trim()).join(', ');\n\nreturn [{\n  json: {\n    inside_image_url: insideImageUrl,\n    restaurant_name: name,\n    short_address: shortAddress\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        864
+      ],
+      "id": "1f6e8ad8-c9c5-4482-b753-5f85c2b592bd",
+      "name": "Clean Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const photos = $input.all().map(item => item.json);\n\nconst imageMessages = photos.map(p => ({\n  type: \"image_url\",\n  image_url: { url: p.original }\n}));\n\nconst urlList = photos.map(p => p.original).join(\"\\n\");\n\nreturn [{\n  json: {\n    requestBody: {\n      model: \"grok-4\",\n      messages: [\n        {\n          role: \"system\",\n          content: `You are a strict restaurant interior photo selector.\nTASK: Select the single best photo that shows the PHYSICAL INTERIOR SPACE of the restaurant.\nMUST SHOW (at least one):\n- Tables and chairs arranged in a dining room\n- The restaurant's walls, ceiling, lighting fixtures, or decor\n- The bar counter or dining hall\n- The overall room/space ambiance\nAUTOMATIC DISQUALIFICATION — reject any photo that primarily shows:\n- Food or dishes (even if a table is visible in the background)\n- A close-up of a pan, plate, or drink\n- People eating without a clear view of the room\n- Exterior of the building\n- A menu or signage only\nIf NO qualifying interior photo exists, return the word: NONE\nYou MUST return ONLY one exact URL from the provided list. No explanation. No other text.`\n        },\n        {\n          role: \"user\",\n          content: [\n            ...imageMessages,\n            {\n              type: \"text\",\n              text: `Examine each image carefully. Reject any image where food, dishes, or a pan/plate is the main subject — even if the setting looks like a restaurant.\nAvailable ORIGINAL URLs (pick BEST ONE interior photo):\n${urlList}`\n            }\n          ]\n        }\n      ]\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        864
+      ],
+      "id": "4926f44b-7728-49d6-86cc-c82e474d96dd",
+      "name": "Prepare data for GROK"
+    },
+    {
+      "parameters": {
+        "url": "=https://serpapi.com/search?engine=google_images_light&q={{ $json.restaurant.name }}+{{ $json.restaurant.city }}+{{ $json.restaurant.country }}+interior&api_key=819c737a9263c55bc1861b425296a31f64ec38c9c1ffe69ce7a9639f82d9d9c0",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -160,
+        896
+      ],
+      "id": "53187194-648e-4c68-ab9f-a1bdaf40501b",
+      "name": "Get Restaurant Inside Photos"
+    },
+    {
+      "parameters": {
+        "method": "HEAD",
+        "url": "={{ $json.original }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        256,
+        896
+      ],
+      "id": "2fc8b1a2-f82f-4688-9648-c72704fa299a",
+      "name": "Request HEAD",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "782fa6ea-9ca2-4044-b131-242601e205da",
+              "leftValue": "={{ $binary.data && $binary.data.mimeType }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "4ae6bb58-1147-4b81-a7e0-072f3c7ae742",
+              "leftValue": "={{ $binary.data?.mimeType }}",
+              "rightValue": "image/",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        896
+      ],
+      "id": "9165198e-3e16-409d-9b59-6ad588f4afc7",
+      "name": "Valid URL"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0a208d41-649e-4eab-9848-e1aca344d45b",
+              "leftValue": "={{ $binary.data.fileSize }}",
+              "rightValue": "0 B",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        848,
+        880
+      ],
+      "id": "9229a857-33bb-4ef6-b91e-921719ae5368",
+      "name": "Check Valid Filesize"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\n\nconst httpsItems = allItems\n  .filter(item => item.json.original?.startsWith('https'))\n  .slice(0, 5);\n\nreturn httpsItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        864
+      ],
+      "id": "223248e0-8162-4294-8e33-3e08c838b5ad",
+      "name": "Select First 5 Images1"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.original }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Range",
+              "value": "bytes=0-0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        656,
+        880
+      ],
+      "id": "6cd6860a-198d-4bb4-a924-55b13a27ba39",
+      "name": "Access URL",
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.x.ai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer xai-wCQPZR693IjHb96ITgGurzJiHtNLCCWS5ldZcPFOq5PR4gpxvYMr6MIpI8hBzr2c9eEEcMAUzd6I3our"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1488,
+        864
+      ],
+      "id": "2dea703b-f985-4fd9-b95d-5e8a36338196",
+      "name": "Identify the Inside Image",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const images = $input.first().json.images_results || [];\n\nreturn images.map(img => ({\n  json: {\n    original: img.original\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        896
+      ],
+      "id": "a5ed4fab-be5f-4c41-9859-af89c2496faa",
+      "name": "Get the Image Links"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3520,
+        928
+      ],
+      "id": "bd9e323e-37c5-4aaa-a59e-87fdfaa8e472",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const name = $input.first().json.restaurant.name;\nconst fullAddress = $input.first().json.restaurant.address;\nconst addressParts = fullAddress.split(',');\nconst shortAddress = addressParts.slice(-2).map(s => s.trim()).join(', ').replace(/\\b\\d+\\b/g, '').replace(/\\s+/g, ' ').trim();\n\nreturn [{\n  json: {\n    restaurant_name: name,\n    short_address: shortAddress\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -64
+      ],
+      "id": "705bc13e-203e-4ecb-859d-1b805dc2a104",
+      "name": "Get name and short Address of the Resturant"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://72.60.96.242:1773/generate-thumbnail",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "restaurant_name",
+              "value": "={{ $json.restaurant_name }}"
+            },
+            {
+              "name": "short_address",
+              "value": "={{ $json.short_address }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3120,
+        752
+      ],
+      "id": "5e81e37d-8039-43b6-8aa5-731a3641d7d3",
+      "name": "Generate Thumbnails"
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "engine",
+              "value": "google_maps_photos"
+            },
+            {
+              "name": "data_id",
+              "value": "={{ $json.place_info.data_id }}"
+            },
+            {
+              "name": "hl",
+              "value": "en"
+            },
+            {
+              "name": "api_key",
+              "value": "819c737a9263c55bc1861b425296a31f64ec38c9c1ffe69ce7a9639f82d9d9c0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1760,
+        912
+      ],
+      "id": "e95e2830-dcfb-4e9f-bf68-6d441ba6499a",
+      "name": "Get Photo Categories"
+    },
+    {
+      "parameters": {
+        "jsCode": "const categories = $input.first().json.categories || [];\n\n// Priority order: prefer actual food/drink photos, fall back to menu photos if that's all a place has\nconst priorityMatchers = [\n  /^food\\s*&?\\s*drink$/i,   // exact \"Food & drink\"\n  /^food$/i,\n  /drink/i,\n  /menu/i                   // last resort — these are photos of the menu itself, not dishes\n];\n\nlet foodCategory = null;\nfor (const pattern of priorityMatchers) {\n  foodCategory = categories.find(c => pattern.test(c.title));\n  if (foodCategory) break;\n}\n\nreturn [{\n  json: {\n    ...$('Pick Newest Unprocessed Reviews1').first().json,\n    category_id: foodCategory ? foodCategory.id : null,\n    category_title: foodCategory ? foodCategory.title : null // handy for debugging/logging which category got picked\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1552,
+        912
+      ],
+      "id": "b8d4e25e-20c7-4cef-9db9-8bd3f8c49f21",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "engine",
+              "value": "google_maps_photos"
+            },
+            {
+              "name": "data_id",
+              "value": "={{ $json.place_info.data_id }}"
+            },
+            {
+              "name": "hl",
+              "value": "en"
+            },
+            {
+              "name": "api_key",
+              "value": "819c737a9263c55bc1861b425296a31f64ec38c9c1ffe69ce7a9639f82d9d9c0"
+            },
+            {
+              "name": "category_id",
+              "value": "={{ $json.category_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1280,
+        912
+      ],
+      "id": "ca1bd2da-8f4f-495c-bb90-2709597fa279",
+      "name": "Get Food Photos"
+    },
+    {
+      "parameters": {
+        "jsCode": "const photos = $input.first().json.photos || [];\nconst stillPhotos = photos.filter(p => !p.video);\nreturn stillPhotos.map(p => ({\n  json: {\n    image: p.image.replace(/=w\\d+-h\\d+.*$/, '=w1600-h1200-k-no')\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1072,
+        912
+      ],
+      "id": "ab56ac45-1c8c-4387-9df5-1c8b8b90a1d5",
+      "name": "filter photos"
+    }
+  ],
+  "connections": {
+    "Run Weekly 2 Times1": {
+      "main": [
+        [
+          {
+            "node": "Get All Reviews1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Reviews1": {
+      "main": [
+        [
+          {
+            "node": "Get Previous Records1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Previous Records1": {
+      "main": [
+        [
+          {
+            "node": "Filter Unprocessed Reviews1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Unprocessed Reviews1": {
+      "main": [
+        [
+          {
+            "node": "Pick Newest Unprocessed Reviews1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Newest Unprocessed Reviews1": {
+      "main": [
+        [
+          {
+            "node": "Get Photo Categories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Payload to Structured Data1": {
+      "main": [
+        [
+          {
+            "node": "Set Avatar Image1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send All Review Images With Metadata",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Restaurant Inside Photos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get name and short Address of the Resturant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send All Review Images With Metadata": {
+      "main": [
+        [
+          {
+            "node": "Merge Multiple Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Avatar Image1": {
+      "main": [
+        [
+          {
+            "node": "Merge Multiple Inputs",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Multiple Inputs": {
+      "main": [
+        [
+          {
+            "node": "Prepare Data for Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Data for Script": {
+      "main": [
+        [
+          {
+            "node": "Generate Spanish Script via xAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Spanish Script via xAI": {
+      "main": [
+        [
+          {
+            "node": "Parse Script & Build Video Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Script & Build Video Prompts": {
+      "main": [
+        [
+          {
+            "node": "Generate Scene 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scene 1": {
+      "main": [
+        [
+          {
+            "node": "Delay 30s after Scene 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delay 30s after Scene 1": {
+      "main": [
+        [
+          {
+            "node": "Generate Scene 2A",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scene 2A": {
+      "main": [
+        [
+          {
+            "node": "Delay 30s after Scene 2A",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delay 30s after Scene 2A": {
+      "main": [
+        [
+          {
+            "node": "Generate Scene 2B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scene 2B": {
+      "main": [
+        [
+          {
+            "node": "Delay 30s after Scene 2B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delay 30s after Scene 2B": {
+      "main": [
+        [
+          {
+            "node": "Generate Scene 3A",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scene 3A": {
+      "main": [
+        [
+          {
+            "node": "Delay 30s after Scene 3A",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delay 30s after Scene 3A": {
+      "main": [
+        [
+          {
+            "node": "Generate Scene 3B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scene 3B": {
+      "main": [
+        [
+          {
+            "node": "Delay 30s after Scene 3B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delay 30s after Scene 3B": {
+      "main": [
+        [
+          {
+            "node": "Generate Scene 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scene 4": {
+      "main": [
+        [
+          {
+            "node": "Wait Render Scene 1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait Render Scene 2A",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait Render Scene 2B",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait Render Scene 3A",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait Render Scene 3B",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait Render Scene 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Render Scene 1": {
+      "main": [
+        [
+          {
+            "node": "Check Scene 1 Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Render Scene 2A": {
+      "main": [
+        [
+          {
+            "node": "Check Scene 2A Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Render Scene 2B": {
+      "main": [
+        [
+          {
+            "node": "Check Scene 2B Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Render Scene 3A": {
+      "main": [
+        [
+          {
+            "node": "Check Scene 3A Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Render Scene 3B": {
+      "main": [
+        [
+          {
+            "node": "Check Scene 3B Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Render Scene 4": {
+      "main": [
+        [
+          {
+            "node": "Check Scene 4 Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Scene 1 Status": {
+      "main": [
+        [
+          {
+            "node": "Wait All Scenes Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Scene 2A Status": {
+      "main": [
+        [
+          {
+            "node": "Wait All Scenes Done",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Check Scene 2B Status": {
+      "main": [
+        [
+          {
+            "node": "Wait All Scenes Done",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Check Scene 3A Status": {
+      "main": [
+        [
+          {
+            "node": "Wait All Scenes Done",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Check Scene 3B Status": {
+      "main": [
+        [
+          {
+            "node": "Wait All Scenes Done",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Check Scene 4 Status": {
+      "main": [
+        [
+          {
+            "node": "Wait All Scenes Done",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "Wait All Scenes Done": {
+      "main": [
+        [
+          {
+            "node": "Prepare Shotstack Timeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Shotstack Timeline": {
+      "main": [
+        [
+          {
+            "node": "Send to Shotstack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Shotstack": {
+      "main": [
+        [
+          {
+            "node": "Wait Shotstack Render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Shotstack Render": {
+      "main": [
+        [
+          {
+            "node": "Check Shotstack Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Shotstack Status": {
+      "main": [
+        [
+          {
+            "node": "Cleanup & Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup & Return": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Build Publishing Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Publishing Payload": {
+      "main": [
+        [
+          {
+            "node": "Upload a video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Multiple Inputs",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Prepare data for GROK": {
+      "main": [
+        [
+          {
+            "node": "Identify the Inside Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Restaurant Inside Photos": {
+      "main": [
+        [
+          {
+            "node": "Get the Image Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request HEAD": {
+      "main": [
+        [
+          {
+            "node": "Valid URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid URL": {
+      "main": [
+        [
+          {
+            "node": "Access URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Valid Filesize": {
+      "main": [
+        [
+          {
+            "node": "Select First 5 Images1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select First 5 Images1": {
+      "main": [
+        [
+          {
+            "node": "Prepare data for GROK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Access URL": {
+      "main": [
+        [
+          {
+            "node": "Check Valid Filesize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify the Inside Image": {
+      "main": [
+        [
+          {
+            "node": "Clean Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get the Image Links": {
+      "main": [
+        [
+          {
+            "node": "Request HEAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get name and short Address of the Resturant": {
+      "main": [
+        [
+          {
+            "node": "Generate Thumbnails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Thumbnails": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Photo Categories": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Get Food Photos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Food Photos": {
+      "main": [
+        [
+          {
+            "node": "filter photos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter photos": {
+      "main": [
+        [
+          {
+            "node": "Transform Payload to Structured Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "839d3b7d13df9d7ab685236bd1a048643c30e413539a3bcc9c8ee8d7fe7d5d04"
+  }
+}

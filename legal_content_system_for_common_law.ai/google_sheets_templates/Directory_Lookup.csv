@@ -1,0 +1,6 @@
+state_code,state_name,practice_area,has_active_attorneys,custom_directory_url,cta_headline,cta_button_text,fallback_url
+TX,Texas,Estate Planning,TRUE,https://common-law.ai/attorneys/?state=texas&practice=estate-planning,Find a Texas Estate Planning Attorney,Search Texas Directory,https://common-law.ai/get-matched/
+MO,Missouri,Corporate & LLC,TRUE,https://common-law.ai/attorneys/?state=missouri&practice=business-law,Need a Missouri Business Attorney?,Browse Missouri Attorneys,https://common-law.ai/get-matched/
+CA,California,all,FALSE,https://common-law.ai/get-matched/?state=california,Need Legal Counsel in California?,Get Matched With An Attorney,https://common-law.ai/get-matched/
+FL,Florida,all,FALSE,https://common-law.ai/get-matched/?state=florida,Facing a Legal Issue in Florida?,Get Matched With An Attorney,https://common-law.ai/get-matched/
+NY,New York,all,FALSE,https://common-law.ai/get-matched/?state=new-york,Looking for New York Legal Assistance?,Get Matched With An Attorney,https://common-law.ai/get-matched/

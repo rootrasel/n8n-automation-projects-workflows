@@ -1,0 +1,2 @@
+error_id,timestamp,workflow,internal_job_id,business,node,error_type,error_message,retry_count,resolved,resolution,technical_timestamps
+ERR_INIT_001,2026-09-08T00:00:00.000Z,SYSTEM_INIT,,,SYSTEM,INFO,Table initialized,0,true,Initialized,2026-09-08T00:00:00.000Z

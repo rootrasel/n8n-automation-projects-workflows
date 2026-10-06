@@ -1,0 +1,219 @@
+{
+  "name": "WF-02 Validate Marketing Job",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf02-trigger-parent",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [-980, 100]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Listings",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "wf02-read-listings",
+      "name": "Read Listings Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-740, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_business_registry",
+          "mode": "id"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "field": "business_id",
+              "operator": "equals",
+              "value": "={{ $json.business_id }}"
+            }
+          ]
+        }
+      },
+      "id": "wf02-lookup-registry",
+      "name": "Lookup Business Drive Registry",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-740, 40],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Comprehensive validation of the marketing job against spec v3.5\nconst job = $('Execute Workflow Trigger').first().json;\nconst reg = $('Lookup Business Drive Registry').first().json || {};\nconst listings = $('Read Listings Sheet').all().map(i => i.json);\n\nconst errors = [];\n\n// 1. Business Status Check\nif (!job.business_id || job.business_status !== 'Active') {\n  errors.push(`Business '${job.business_name || 'unknown'}' is not Active (Status: ${job.business_status || 'missing'}).`);\n}\n\n// 2. Drive Registry Provisioning Check\nif (!reg.root_drive_id || reg.provisioning_status !== 'COMPLETED') {\n  errors.push(`Business Drive folder structure not provisioned. Run WF-00 first.`);\n}\n\n// 3. Marketing Job, Content Format, and Prompt Template Checks\nif (!job.marketing_job || !job.marketing_job.trim()) {\n  errors.push('Marketing Job name is required.');\n}\n\nconst allowedFormats = ['Reel', 'Static Image', 'Story', 'Carousel'];\nif (!job.content_format || !allowedFormats.includes(job.content_format)) {\n  errors.push(`Invalid or missing Content Format '${job.content_format}'. Must be one of: ${allowedFormats.join(', ')}.`);\n}\n\nif (!job.prompt_template || !job.prompt_template.trim()) {\n  errors.push('Prompt Template is required.');\n}\n\n// 4. Listing Check if Content Focus = Listing\nlet resolvedListing = null;\nif (job.content_focus && job.content_focus.trim().toLowerCase() === 'listing') {\n  if (!job.selected_listing || !job.selected_listing.trim()) {\n    errors.push(\"Content Focus is 'Listing' but Selected Listing is blank.\");\n  } else {\n    const match = listings.find(l => \n      String(l['Listing Name'] || '').trim().toLowerCase() === job.selected_listing.trim().toLowerCase() ||\n      String(l['Listing ID'] || '').trim().toLowerCase() === job.selected_listing.trim().toLowerCase()\n    );\n    if (!match) {\n      errors.push(`Selected Listing '${job.selected_listing}' not found in Listings sheet.`);\n    } else if (String(match.Active).toUpperCase() !== 'TRUE') {\n      errors.push(`Selected Listing '${job.selected_listing}' is not marked Active in Listings sheet.`);\n    } else {\n      resolvedListing = match;\n    }\n  }\n}\n\n// 5. State Check: verify internal job is not already finished or in terminal state\nconst invalidTerminalStates = ['Ready to Schedule', 'Schedule Requested', 'Scheduled', 'Publish Confirmed', 'Published'];\nif (invalidTerminalStates.includes(job.scheduling_status)) {\n  errors.push(`Job already in advanced scheduling state: '${job.scheduling_status}'.`);\n}\n\nconst isValid = errors.length === 0;\n\nreturn [{\n  json: {\n    ...job,\n    is_valid: isValid,\n    validation_errors: errors,\n    registry_info: reg,\n    resolved_listing: resolvedListing,\n    validated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "wf02-run-validation",
+      "name": "Execute Job Validation Rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-valid",
+              "leftValue": "={{ $json.is_valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf02-if-valid",
+      "name": "IF Validation Passed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-280, 100]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf03-media-lookup",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf02-call-wf03",
+      "name": "Pass to WF-03 Lookup",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [-60, 40]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Marketing Job",
+        "valueToMatchOn": "={{ $json.marketing_job }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Production Status",
+              "fieldValue": "Revision Needed"
+            },
+            {
+              "fieldId": "Revision Notes",
+              "fieldValue": "={{ 'Validation Failed: ' + $json.validation_errors.join(' | ') }}"
+            }
+          ]
+        }
+      },
+      "id": "wf02-update-sheet-fail",
+      "name": "Flag Row in Marketing Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-60, 240],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_error_log",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "error_id": "=ERR_VAL_{{$now.toMillis()}}",
+            "timestamp": "={{$now.toISOString()}}",
+            "workflow": "WF-02",
+            "internal_job_id": "={{$json.internal_job_id}}",
+            "business": "={{$json.business_name}}",
+            "node": "Execute Job Validation Rules",
+            "error_type": "BUSINESS_RULE",
+            "error_message": "={{$json.validation_errors.join('; ')}}",
+            "resolved": false
+          }
+        }
+      },
+      "id": "wf02-log-validation-error",
+      "name": "Log Error to Data Table",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [160, 240]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [{ "node": "Lookup Business Drive Registry", "type": "main", "index": 0 }]
+      ]
+    },
+    "Lookup Business Drive Registry": {
+      "main": [
+        [{ "node": "Read Listings Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Listings Sheet": {
+      "main": [
+        [{ "node": "Execute Job Validation Rules", "type": "main", "index": 0 }]
+      ]
+    },
+    "Execute Job Validation Rules": {
+      "main": [[{ "node": "IF Validation Passed", "type": "main", "index": 0 }]]
+    },
+    "IF Validation Passed": {
+      "main": [
+        [{ "node": "Pass to WF-03 Lookup", "type": "main", "index": 0 }],
+        [{ "node": "Flag Row in Marketing Queue", "type": "main", "index": 0 }]
+      ]
+    },
+    "Flag Row in Marketing Queue": {
+      "main": [[{ "node": "Log Error to Data Table", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

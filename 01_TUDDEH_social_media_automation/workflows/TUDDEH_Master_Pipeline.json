@@ -1,0 +1,105 @@
+{
+  "name": "TUDDEH Master Production Pipeline",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "master-manual-trigger",
+      "name": "Run Master Pipeline Manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, 100]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "master-schedule-trigger",
+      "name": "Schedule Interval (Every 15m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 260]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf01-marketing-queue-trigger",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "master-call-wf01",
+      "name": "Run WF-01 Marketing Queue Intake Gate",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [-960, 180]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf13a-schedule-requested",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "master-call-wf13a",
+      "name": "Run WF-13A Scheduling Verification",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [-720, 100]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf13b-publish-confirmed",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "master-call-wf13b",
+      "name": "Run WF-13B Publishing Verification",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [-480, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pipeline operational summary\nreturn [{\n  json: {\n    status: 'CYCLE_COMPLETED',\n    timestamp: new Date().toISOString(),\n    message: 'TUDDEH Master Pipeline execution cycle completed successfully.'\n  }\n}];"
+      },
+      "id": "master-summary",
+      "name": "Pipeline Cycle Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-240, 100]
+    }
+  ],
+  "connections": {
+    "Run Master Pipeline Manually": {
+      "main": [[{ "node": "Run WF-01 Marketing Queue Intake Gate", "type": "main", "index": 0 }]]
+    },
+    "Schedule Interval (Every 15m)": {
+      "main": [[{ "node": "Run WF-01 Marketing Queue Intake Gate", "type": "main", "index": 0 }]]
+    },
+    "Run WF-01 Marketing Queue Intake Gate": {
+      "main": [[{ "node": "Run WF-13A Scheduling Verification", "type": "main", "index": 0 }]]
+    },
+    "Run WF-13A Scheduling Verification": {
+      "main": [[{ "node": "Run WF-13B Publishing Verification", "type": "main", "index": 0 }]]
+    },
+    "Run WF-13B Publishing Verification": {
+      "main": [[{ "node": "Pipeline Cycle Summary", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

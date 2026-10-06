@@ -1,0 +1,11 @@
+{
+  "prompt_id": "PROMPT_DEAL_V1",
+  "preset_id": "DEAL_V1",
+  "format": "Static Image / Carousel",
+  "color_palette": {
+    "accent": "#FF6B35",
+    "headline": "#FFFFFF",
+    "overlay": "#1A0A00"
+  },
+  "rules": "Urgent, value-first, concise percentage or perk callout, expiration date highlighted."
+}

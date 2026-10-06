@@ -1,0 +1,451 @@
+{
+  "name": "WF-11 Approval Revision Rejection Controller",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "tuddeh-approval",
+        "options": {
+          "responseMode": "responseNode"
+        }
+      },
+      "id": "wf11-webhook-trigger",
+      "name": "Webhook: tuddeh-approval",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-980, 100],
+      "webhookId": "tuddeh-approval"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_content_jobs",
+          "mode": "id"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "field": "internal_job_id",
+              "operator": "equals",
+              "value": "={{ $json.query.jobId }}"
+            }
+          ]
+        }
+      },
+      "id": "wf11-lookup-job",
+      "name": "Lookup Job in tuddeh_content_jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-740, 100],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Authenticate approval action, token, version, and reviewer identity\nconst webhookData = $('Webhook: tuddeh-approval').first().json;\nconst query = webhookData.query || {};\nconst job = $input.item?.json || {};\n\nconst action = String(query.action || '').toLowerCase();\nconst incomingToken = String(query.token || '');\nconst incomingVersion = Number(query.version || 0);\n\nconst storedToken = String(job.approval_token || '');\nconst storedVersion = Number(job.approval_version || 1);\n\n// Identity and token validation\nlet authSuccess = true;\nlet authFailureReason = '';\n\nif (!job.internal_job_id) {\n  authSuccess = false;\n  authFailureReason = 'Internal Job record not found in system.';\n} else if (!storedToken || incomingToken !== storedToken) {\n  authSuccess = false;\n  authFailureReason = 'Invalid or expired single-use approval token.';\n} else if (incomingVersion !== storedVersion) {\n  authSuccess = false;\n  authFailureReason = `Stale approval link. This action is for revision ${incomingVersion}, but current revision is ${storedVersion}.`;\n} else if (!['approve', 'revise', 'reject'].includes(action)) {\n  authSuccess = false;\n  authFailureReason = `Unsupported action '${action}'. Must be approve, revise, or reject.`;\n}\n\nreturn [{\n  json: {\n    ...job,\n    requested_action: action,\n    auth_success: authSuccess,\n    auth_failure_reason: authFailureReason,\n    revision_notes: query.notes || 'Revision requested via approval portal'\n  }\n}];"
+      },
+      "id": "wf11-auth-decision",
+      "name": "Validate Token & Version Guardrails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-auth-success",
+              "leftValue": "={{ $json.auth_success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf11-if-authorized",
+      "name": "IF Action Authorized",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-280, 100]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.requested_action }}",
+                    "rightValue": "approve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.requested_action }}",
+                    "rightValue": "revise",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      },
+      "id": "wf11-switch-action",
+      "name": "Route Action: Approve / Revise / Reject",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [-60, 40]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Marketing Job",
+        "valueToMatchOn": "={{ $json.marketing_job }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Production Status",
+              "fieldValue": "Approved"
+            }
+          ]
+        }
+      },
+      "id": "wf11-sheet-approve",
+      "name": "Update MQ Production Status = Approved",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [200, -80],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf12-create-approved-package",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf11-call-wf12",
+      "name": "Call WF-12 Package Builder",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [440, -80]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html><html><body style='font-family:sans-serif;background:#0d1117;color:#58a6ff;padding:40px;text-align:center;'><h1>✅ Content Approved!</h1><p style='color:#c9d1d9;'>WF-12 is packaging the approved content and moving it to <strong>01 Ready to Schedule</strong>.</p></body></html>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "wf11-respond-approve",
+      "name": "Respond Approved (HTML)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, -80]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-cap",
+              "leftValue": "={{ Number($json.approval_version || 1) }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf11-if-under-revision-limit",
+      "name": "IF Under Revision Cap (<3)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [200, 60]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Marketing Job",
+        "valueToMatchOn": "={{ $json.marketing_job }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Production Status",
+              "fieldValue": "Revision Needed"
+            },
+            {
+              "fieldId": "Revision Notes",
+              "fieldValue": "={{ $json.revision_notes }}"
+            }
+          ]
+        }
+      },
+      "id": "wf11-sheet-revision-needed",
+      "name": "Update MQ Production Status = Revision Needed",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [440, 20],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html><html><body style='font-family:sans-serif;background:#0d1117;color:#d29922;padding:40px;text-align:center;'><h1>🔄 Revision Requested</h1><p style='color:#c9d1d9;'>Notes recorded in Marketing Queue. Automated regeneration is underway.</p></body></html>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "wf11-respond-revise",
+      "name": "Respond Revision (HTML)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 20]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html><html><body style='font-family:sans-serif;background:#0d1117;color:#f85149;padding:40px;text-align:center;'><h1>⚠️ Maximum Revision Cap Reached</h1><p style='color:#c9d1d9;'>This job has reached the maximum 3 automated revisions. Manual human review is required before further generation.</p></body></html>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "wf11-respond-cap-exceeded",
+      "name": "Respond Revision Cap Reached (HTML)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 160]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Marketing Job",
+        "valueToMatchOn": "={{ $json.marketing_job }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Production Status",
+              "fieldValue": "Planned"
+            },
+            {
+              "fieldId": "Revision Notes",
+              "fieldValue": "Draft rejected and archived by reviewer"
+            }
+          ]
+        }
+      },
+      "id": "wf11-sheet-reject",
+      "name": "Archive in Sheet on Reject",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [200, 260],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html><html><body style='font-family:sans-serif;background:#0d1117;color:#f85149;padding:40px;text-align:center;'><h1>❌ Content Rejected</h1><p style='color:#c9d1d9;'>The draft has been archived to <strong>07 Rejected or Archived</strong>.</p></body></html>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "wf11-respond-reject",
+      "name": "Respond Reject (HTML)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 260]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=<!DOCTYPE html><html><body style='font-family:sans-serif;background:#0d1117;color:#f85149;padding:40px;text-align:center;'><h1>🚫 Action Unauthorized</h1><p style='color:#c9d1d9;'>{{$json.auth_failure_reason}}</p></body></html>",
+        "options": {
+          "responseCode": 403,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "wf11-respond-forbidden",
+      "name": "Respond 403 Forbidden (HTML)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-60, 240]
+    }
+  ],
+  "connections": {
+    "Webhook: tuddeh-approval": {
+      "main": [[{ "node": "Lookup Job in tuddeh_content_jobs", "type": "main", "index": 0 }]]
+    },
+    "Lookup Job in tuddeh_content_jobs": {
+      "main": [[{ "node": "Validate Token & Version Guardrails", "type": "main", "index": 0 }]]
+    },
+    "Validate Token & Version Guardrails": {
+      "main": [[{ "node": "IF Action Authorized", "type": "main", "index": 0 }]]
+    },
+    "IF Action Authorized": {
+      "main": [
+        [{ "node": "Route Action: Approve / Revise / Reject", "type": "main", "index": 0 }],
+        [{ "node": "Respond 403 Forbidden (HTML)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route Action: Approve / Revise / Reject": {
+      "main": [
+        [{ "node": "Update MQ Production Status = Approved", "type": "main", "index": 0 }],
+        [{ "node": "IF Under Revision Cap (<3)", "type": "main", "index": 0 }],
+        [{ "node": "Archive in Sheet on Reject", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update MQ Production Status = Approved": {
+      "main": [[{ "node": "Call WF-12 Package Builder", "type": "main", "index": 0 }]]
+    },
+    "Call WF-12 Package Builder": {
+      "main": [[{ "node": "Respond Approved (HTML)", "type": "main", "index": 0 }]]
+    },
+    "IF Under Revision Cap (<3)": {
+      "main": [
+        [{ "node": "Update MQ Production Status = Revision Needed", "type": "main", "index": 0 }],
+        [{ "node": "Respond Revision Cap Reached (HTML)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update MQ Production Status = Revision Needed": {
+      "main": [[{ "node": "Respond Revision (HTML)", "type": "main", "index": 0 }]]
+    },
+    "Archive in Sheet on Reject": {
+      "main": [[{ "node": "Respond Reject (HTML)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

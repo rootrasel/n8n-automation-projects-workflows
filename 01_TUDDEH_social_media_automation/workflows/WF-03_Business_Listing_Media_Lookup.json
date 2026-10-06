@@ -1,0 +1,285 @@
+{
+  "name": "WF-03 Business Listing Media Lookup & Reel Quality Gate (v3.5 FINAL)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf03-trigger-parent",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [-900, 100]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_business_registry",
+          "mode": "id"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "business_id",
+              "keyValue": "={{ $json.business_id }}"
+            }
+          ]
+        }
+      },
+      "id": "wf03-get-registry",
+      "name": "Get Business Drive Folder IDs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-680, 100],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_asset_usage",
+          "mode": "id"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "business_id",
+              "keyValue": "={{ $('Execute Workflow Trigger').item.json.business_id }}"
+            }
+          ]
+        }
+      },
+      "id": "wf03-get-asset-usage",
+      "name": "Get Asset Usage History",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-460, 100],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $('Execute Workflow Trigger').first().json;\nconst reg = $('Get Business Drive Folder IDs').first().json || {};\nconst usageData = $input.all().map(i => i.json).filter(u => u && (u.asset_id || u.asset_drive_id));\n\nconst isReel = String(job.content_format || '').trim().toLowerCase() === 'reel';\nconst targetFolderId = isReel ? reg.videos_folder_id : reg.photos_folder_id;\n\nreturn [{\n  json: {\n    ...job,\n    target_asset_folder_id: targetFolderId,\n    is_reel: isReel,\n    registry: reg,\n    usage_history: usageData\n  }\n}];"
+      },
+      "id": "wf03-prep-drive-search",
+      "name": "Prepare Search & Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-240, 100]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "={{ $json.target_asset_folder_id }}"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {}
+      },
+      "id": "wf03-list-drive-assets",
+      "name": "List Assets From Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-20, 100],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "googleDriveOAuth2Api",
+          "name": "Google Drive account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Prepare Search & Context').first().json;\nconst rawAssets = $input.all().map(i => i.json).filter(f => f && f.id);\nconst usageItems = ctx.usage_history || [];\n\nconst usageMap = {};\nfor (const u of usageItems) {\n  const id = u.asset_id || u.asset_drive_id;\n  usageMap[id] = {\n    usage_count: Number(u.usage_count || 0),\n    last_used: u.last_used_timestamp || ''\n  };\n}\n\nconst rankedAssets = rawAssets.map(a => {\n  const u = usageMap[a.id] || { usage_count: 0, last_used: '' };\n  return {\n    id: a.id,\n    name: a.name,\n    mimeType: a.mimeType,\n    size: Number(a.size || 0),\n    usage_count: u.usage_count,\n    last_used: u.last_used\n  };\n}).sort((a, b) => a.usage_count - b.usage_count);\n\nlet meetsQualityGate = true;\nlet gateFailureReason = '';\n\nif (ctx.is_reel) {\n  const validVideos = rankedAssets.filter(a => {\n    const isVid = (a.mimeType && a.mimeType.includes('video')) ||\n                  (a.name && (a.name.toLowerCase().endsWith('.mp4') || a.name.toLowerCase().endsWith('.mov')));\n    const hasMinSize = a.size > 500000; // >500KB\n    return isVid && hasMinSize;\n  });\n\n  if (validVideos.length < 1) {\n    meetsQualityGate = false;\n    gateFailureReason = 'Insufficient usable Reel footage (minimum 1 valid video clip > 500KB required in 03 Videos).';\n  }\n} else {\n  ctx.available_user_images_count = rankedAssets.filter(a => \n    (a.mimeType && a.mimeType.includes('image')) || \n    (a.name && (a.name.toLowerCase().endsWith('.jpg') || a.name.toLowerCase().endsWith('.png')))\n  ).length;\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    approved_assets: rankedAssets,\n    meets_quality_gate: meetsQualityGate,\n    gate_failure_reason: gateFailureReason,\n    selected_candidate_assets: rankedAssets.slice(0, 5)\n  }\n}];"
+      },
+      "id": "wf03-reel-quality-gate",
+      "name": "Reel Quality Gate & Media Selection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [200, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-quality-pass",
+              "leftValue": "={{ $json.meets_quality_gate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf03-if-quality-pass",
+      "name": "IF Quality Gate Passed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [420, 100]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf05-ai-content-decision",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf03-call-wf05",
+      "name": "Pass to WF-05 AI Content Decision",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [640, 20]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Marketing Job",
+        "valueToMatchOn": "={{ $json.marketing_job }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Production Status",
+              "fieldValue": "Revision Needed"
+            },
+            {
+              "fieldId": "Revision Notes",
+              "fieldValue": "={{ $json.gate_failure_reason }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf03-update-sheet-insufficient",
+      "name": "Flag Insufficient Footage in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [640, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_error_log",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "error_id": "={{ 'ERR_QUALITY_' + Date.now() }}",
+            "timestamp": "={{ new Date().toISOString() }}",
+            "workflow": "WF-03",
+            "internal_job_id": "={{ $json.internal_job_id }}",
+            "business": "={{ $json.business_name }}",
+            "node": "Reel Quality Gate & Media Selection",
+            "error_type": "BUSINESS_RULE",
+            "error_message": "={{ $json.gate_failure_reason }}",
+            "resolved": false
+          }
+        },
+        "options": {}
+      },
+      "id": "wf03-log-quality-error",
+      "name": "Log Insufficient Footage Error",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [860, 200]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf99-error-handler",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf03-call-wf99",
+      "name": "Alert via WF-99",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [1080, 200]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [{ "node": "Get Business Drive Folder IDs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Business Drive Folder IDs": {
+      "main": [
+        [{ "node": "Get Asset Usage History", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Asset Usage History": {
+      "main": [
+        [{ "node": "Prepare Search & Context", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Search & Context": {
+      "main": [
+        [{ "node": "List Assets From Google Drive", "type": "main", "index": 0 }]
+      ]
+    },
+    "List Assets From Google Drive": {
+      "main": [
+        [{ "node": "Reel Quality Gate & Media Selection", "type": "main", "index": 0 }]
+      ]
+    },
+    "Reel Quality Gate & Media Selection": {
+      "main": [
+        [{ "node": "IF Quality Gate Passed", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF Quality Gate Passed": {
+      "main": [
+        [{ "node": "Pass to WF-05 AI Content Decision", "type": "main", "index": 0 }],
+        [{ "node": "Flag Insufficient Footage in Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Flag Insufficient Footage in Sheet": {
+      "main": [
+        [{ "node": "Log Insufficient Footage Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Insufficient Footage Error": {
+      "main": [
+        [{ "node": "Alert via WF-99", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

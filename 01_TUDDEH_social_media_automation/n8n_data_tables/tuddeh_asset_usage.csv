@@ -1,0 +1,3 @@
+id,asset_id,business_id,last_used_timestamp,usage_count,file_name,file_type
+1,drive_file_vid_01,BIZ_001,2026-09-01T10:00:00.000Z,1,espresso_pour_4k.mp4,video
+2,drive_file_photo_01,BIZ_001,2026-09-02T14:30:00.000Z,1,croissant_display.jpg,photo

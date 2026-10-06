@@ -1,0 +1,159 @@
+{
+  "name": "WF-99 Global Technical Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf99-error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [-980, 100]
+    },
+    {
+      "parameters": {},
+      "id": "wf99-manual-trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [-980, -60]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Classify error and calculate retry backoff\nconst input = $json;\nconst execution = input.execution || {};\nconst error = input.error || {};\n\nconst msg = String(error.message || input.error_message || 'Unknown technical failure');\nconst nodeName = error.node?.name || input.node || 'Unknown Node';\nconst wfName = input.workflow?.name || input.workflow || 'Unknown Workflow';\nconst jobId = input.internal_job_id || execution.customData?.internal_job_id || 'N/A';\nconst business = input.business || execution.customData?.business || 'N/A';\nconst currentRetries = Number(input.retry_count || 0);\n\n// Determine classification:\n// TRANSIENT: Rate limits (429), timeouts, 502/503/504 gateway issues, network socket resets\n// BUSINESS_RULE: Validation errors, missing assets, duplicate state, unauthorized token\nlet errorType = 'SYSTEM';\nlet isTransient = false;\n\nif (/429|rate limit|timeout|ETIMEDOUT|ECONNRESET|502|503|504/i.test(msg)) {\n  errorType = 'TRANSIENT';\n  isTransient = true;\n} else if (/validation|insufficient|missing|duplicate|unauthorized|stale/i.test(msg)) {\n  errorType = 'BUSINESS_RULE';\n  isTransient = false;\n}\n\nconst canRetry = isTransient && currentRetries < 2;\nconst nextRetry = currentRetries + 1;\nconst backoffMs = Math.pow(2, nextRetry) * 2500; // 5s, 10s backoff\n\nconst errId = `ERR_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;\n\nreturn [{\n  json: {\n    error_id: errId,\n    timestamp: new Date().toISOString(),\n    workflow: wfName,\n    internal_job_id: jobId,\n    business: business,\n    node: nodeName,\n    error_type: errorType,\n    error_message: msg,\n    retry_count: currentRetries,\n    can_retry: canRetry,\n    next_retry_count: nextRetry,\n    backoff_ms: backoffMs,\n    resolved: false,\n    resolution: canRetry ? `SCHEDULED_RETRY_${nextRetry}` : 'LOGGED_REQUIRING_ATTENTION'\n  }\n}];"
+      },
+      "id": "wf99-classify-error",
+      "name": "Classify Error & Evaluate Retry Backoff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-740, 20]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_error_log",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "error_id": "={{ $json.error_id }}",
+            "timestamp": "={{ $json.timestamp }}",
+            "workflow": "={{ $json.workflow }}",
+            "internal_job_id": "={{ $json.internal_job_id }}",
+            "business": "={{ $json.business }}",
+            "node": "={{ $json.node }}",
+            "error_type": "={{ $json.error_type }}",
+            "error_message": "={{ $json.error_message }}",
+            "retry_count": "={{ $json.retry_count }}",
+            "resolved": "={{ $json.resolved }}",
+            "resolution": "={{ $json.resolution }}",
+            "technical_timestamps": "={{ $now.toISOString() }}"
+          }
+        }
+      },
+      "id": "wf99-log-datatable",
+      "name": "Log to tuddeh_error_log Data Table",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-500, 20]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-can-retry",
+              "leftValue": "={{ $json.can_retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf99-if-retry",
+      "name": "IF Can Retry (Transient < 2)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-280, 20]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json.backoff_ms }}",
+        "unit": "milliseconds"
+      },
+      "id": "wf99-wait-backoff",
+      "name": "Wait Exponential Backoff",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [-60, -60],
+      "webhookId": "error-retry-wait"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Trigger retry event or update retry counter\nreturn [{\n  json: {\n    status: 'RETRY_INITIATED',\n    retry_count: $json.next_retry_count,\n    workflow: $json.workflow,\n    internal_job_id: $json.internal_job_id\n  }\n}];"
+      },
+      "id": "wf99-execute-retry",
+      "name": "Execute Retried Operation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [160, -60]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.TUDDEH_APPROVAL_EMAIL || 'dev-alerts@tuddeh.com' }}",
+        "subject": "=[TUDDEH SYSTEM ALERT] Error in {{$json.workflow}} ({{$json.error_type}})",
+        "message": "=<h3>🚨 TUDDEH Technical Error Notification</h3><p><strong>Workflow:</strong> {{$json.workflow}}<br><strong>Node:</strong> {{$json.node}}<br><strong>Job ID:</strong> {{$json.internal_job_id}}<br><strong>Business:</strong> {{$json.business}}<br><strong>Error Type:</strong> {{$json.error_type}}</p><pre style='background:#f6f8fa;padding:12px;border:1px solid #d0d7de;'>{{$json.error_message}}</pre>",
+        "options": {}
+      },
+      "id": "wf99-send-alert-email",
+      "name": "Send Critical Alert (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [-60, 100],
+      "credentials": {
+        "gmailOAuth2Api": {
+          "id": "gmailOAuth2Api",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [[{ "node": "Classify Error & Evaluate Retry Backoff", "type": "main", "index": 0 }]]
+    },
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Classify Error & Evaluate Retry Backoff", "type": "main", "index": 0 }]]
+    },
+    "Classify Error & Evaluate Retry Backoff": {
+      "main": [[{ "node": "Log to tuddeh_error_log Data Table", "type": "main", "index": 0 }]]
+    },
+    "Log to tuddeh_error_log Data Table": {
+      "main": [[{ "node": "IF Can Retry (Transient < 2)", "type": "main", "index": 0 }]]
+    },
+    "IF Can Retry (Transient < 2)": {
+      "main": [
+        [{ "node": "Wait Exponential Backoff", "type": "main", "index": 0 }],
+        [{ "node": "Send Critical Alert (Gmail)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait Exponential Backoff": {
+      "main": [[{ "node": "Execute Retried Operation", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

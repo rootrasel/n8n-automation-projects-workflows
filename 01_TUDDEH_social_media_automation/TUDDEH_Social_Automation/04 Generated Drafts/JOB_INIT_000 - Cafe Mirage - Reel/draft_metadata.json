@@ -1,0 +1,18 @@
+{
+  "internal_job_id": "JOB_INIT_000",
+  "business": "Cafe Mirage",
+  "format": "Reel",
+  "headline": "Craving artisanal coffee in the heart of downtown?",
+  "caption": "Your morning ritual deserves better than burnt beans. Slow-poured espresso and fresh butter croissants baked every morning at 6:00 AM.",
+  "hashtags": [
+    "#CafeMirage",
+    "#DowntownCoffee",
+    "#SpecialtyEspresso",
+    "#FreshPastries"
+  ],
+  "CTA": "Drop by Cafe Mirage on 4th & Elm or order ahead at the link in bio.",
+  "recommended_publish_date": "2026-09-28",
+  "recommended_publish_time": "08:30 AM",
+  "approval_version": 1,
+  "token_status": "AWAITING_REVIEW"
+}

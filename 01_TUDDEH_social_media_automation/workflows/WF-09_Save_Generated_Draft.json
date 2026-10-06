@@ -1,0 +1,180 @@
+{
+  "name": "WF-09 Save Draft & Send Approval Request",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf09-trigger-parent",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [-980, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare draft folder paths and generate metadata.json payload\nconst job = $json;\nconst pkg = job.ai_package || {};\nconst ts = new Date().toISOString();\n\nconst metadata = {\n  internal_job_id: job.internal_job_id,\n  prompt_id: job.prompt_id || 'PROMPT_DEFAULT',\n  prompt_version: job.prompt_version || 'v3.5',\n  style_preset_id: job.style_preset_id || 'BUSINESS_V1',\n  generation_revision_version: job.approval_version || 1,\n  selected_source_asset_ids: pkg.selected_assets || [],\n  generation_timestamp: ts\n};\n\nconst captionContent = `${pkg.caption || ''}\\n\\n` +\n  `${(pkg.hashtags || []).map(h => h.startsWith('#') ? h : '#' + h).join(' ')}\\n\\n` +\n  `CTA: ${pkg.CTA || ''}`;\n\nconst postingInfoContent = `TUDDEH DRAFT POSTING INFO\\n` +\n  `=========================\\n` +\n  `Job ID: ${job.internal_job_id}\\n` +\n  `Business: ${job.business_name}\\n` +\n  `Format: ${job.content_format}\\n` +\n  `Headline: ${pkg.headline || ''}\\n` +\n  `Experience Line: ${pkg.experience_line || ''}\\n` +\n  `Recommended Date: ${job.recommended_publish_date}\\n` +\n  `Recommended Time: ${job.recommended_publish_time}\\n` +\n  `Status: Ready for Review\\n` +\n  `Timestamp: ${ts}`;\n\nconst masterDraftsParentId = $env.DRIVE_04_GENERATED_DRAFTS_FOLDER_ID || '04_GENERATED_DRAFTS_MASTER_ID';\nconst jobDraftFolderName = `${job.business_name} - ${job.internal_job_id}`;\n\nreturn [{\n  json: {\n    ...job,\n    metadata_json: metadata,\n    caption_txt: captionContent,\n    posting_info_txt: postingInfoContent,\n    master_drafts_parent_id: masterDraftsParentId,\n    job_draft_folder_name: jobDraftFolderName\n  }\n}];"
+      },
+      "id": "wf09-prep-package",
+      "name": "Prepare Draft Package & Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-740, 100]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "operation": "create",
+        "name": "={{ $json.job_draft_folder_name }}",
+        "options": {
+          "parents": ["={{ $json.master_drafts_parent_id }}"]
+        }
+      },
+      "id": "wf09-create-draft-folder",
+      "name": "Create Job Draft Folder in Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-500, 100],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "googleDriveOAuth2Api",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Attach created draft folder ID and URL\nconst prep = $('Prepare Draft Package & Metadata').first().json;\nconst folder = $input.item.json;\nconst folderId = folder.id || 'MOCK_DRAFT_FOLDER_ID';\nconst folderUrl = `https://drive.google.com/drive/folders/${folderId}`;\n\nreturn [{\n  json: {\n    ...prep,\n    drive_draft_folder_id: folderId,\n    draft_folder_url: folderUrl,\n    final_asset_link: folderUrl\n  }\n}];"
+      },
+      "id": "wf09-attach-folder-id",
+      "name": "Attach Draft Folder ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-280, 100]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Marketing Job",
+        "valueToMatchOn": "={{ $json.marketing_job }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Production Status",
+              "fieldValue": "Ready for Review"
+            },
+            {
+              "fieldId": "Final Asset Link",
+              "fieldValue": "={{ $json.draft_folder_url }}"
+            }
+          ]
+        }
+      },
+      "id": "wf09-update-sheet-ready-review",
+      "name": "Update Sheet: Ready for Review",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-60, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate unique cryptographic approval token and build signed action URLs (formerly WF-10)\nconst job = $('Attach Draft Folder ID').first().json;\nconst pkg = job.ai_package || {};\nconst crypto = require('crypto');\nconst token = crypto.randomBytes(24).toString('hex');\nconst version = Number(job.approval_version || 1);\n\nconst webhookBase = ($env.WEBHOOK_TUNNEL_URL || $env.N8N_HOST || 'http://localhost:5678').replace(/\\/$/, '');\nconst approveUrl = `${webhookBase}/webhook/tuddeh-approval?action=approve&jobId=${encodeURIComponent(job.internal_job_id)}&version=${version}&token=${token}`;\nconst reviseUrl = `${webhookBase}/webhook/tuddeh-approval?action=revise&jobId=${encodeURIComponent(job.internal_job_id)}&version=${version}&token=${token}`;\nconst rejectUrl = `${webhookBase}/webhook/tuddeh-approval?action=reject&jobId=${encodeURIComponent(job.internal_job_id)}&version=${version}&token=${token}`;\n\nconst reviewerEmail = $env.TUDDEH_APPROVAL_EMAIL || 'review@tuddeh.com';\n\nconst htmlBody = `\n<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d0f12; color: #f0f0f0; margin: 0; padding: 24px; }\n    .container { max-width: 600px; margin: 0 auto; background: #161a22; border-radius: 12px; border: 1px solid #30363d; overflow: hidden; }\n    .header { background: #000000; padding: 20px 24px; border-bottom: 2px solid #d4af37; }\n    .header h2 { margin: 0; color: #d4af37; font-size: 20px; }\n    .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; background: #21262d; color: #58a6ff; margin-top: 6px; }\n    .content { padding: 24px; }\n    .section { margin-bottom: 20px; }\n    .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; margin-bottom: 6px; }\n    .highlight { background: #0d1117; padding: 14px; border-radius: 8px; border-left: 3px solid #d4af37; font-size: 14px; line-height: 1.5; }\n    .btn-group { display: flex; gap: 12px; margin-top: 28px; }\n    .btn { display: inline-block; padding: 12px 20px; border-radius: 8px; font-weight: 600; text-decoration: none; text-align: center; font-size: 14px; }\n    .btn-approve { background: #238636; color: #ffffff; }\n    .btn-revise { background: #d29922; color: #ffffff; }\n    .btn-reject { background: #da3633; color: #ffffff; }\n    .footer { padding: 16px 24px; background: #0d1117; text-align: center; font-size: 12px; color: #8b949e; border-top: 1px solid #21262d; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h2>TUDDEH Approval Required</h2>\n      <span class=\"badge\">${job.business_name} • ${job.content_format} (Rev ${version})</span>\n    </div>\n    <div class=\"content\">\n      <div class=\"section\">\n        <div class=\"section-title\">Headline & Hook</div>\n        <div class=\"highlight\"><strong>${pkg.headline || 'Untitled Hook'}</strong><br><em>${pkg.experience_line || ''}</em></div>\n      </div>\n      <div class=\"section\">\n        <div class=\"section-title\">Caption & CTA</div>\n        <div class=\"highlight\" style=\"white-space: pre-wrap;\">${pkg.caption || ''}\\n\\n${(pkg.hashtags || []).join(' ')}\\n\\n<strong>CTA:</strong> ${pkg.CTA || ''}</div>\n      </div>\n      <div class=\"section\">\n        <div class=\"section-title\">Recommended Schedule</div>\n        <div style=\"font-size: 14px; color: #c9d1d9;\">📅 ${job.recommended_publish_date} at ⏰ ${job.recommended_publish_time}</div>\n      </div>\n      <div class=\"section\">\n        <div class=\"section-title\">Generated Draft Asset</div>\n        <div style=\"margin-top: 8px;\">\n          <a href=\"${job.final_asset_link}\" target=\"_blank\" style=\"color: #58a6ff; text-decoration: underline; font-weight: 500;\">👉 View Generated Draft in Google Drive</a>\n        </div>\n      </div>\n      <div class=\"btn-group\">\n        <a href=\"${approveUrl}\" class=\"btn btn-approve\">✅ Approve</a>\n        <a href=\"${reviseUrl}\" class=\"btn btn-revise\">🔄 Request Revision</a>\n        <a href=\"${rejectUrl}\" class=\"btn btn-reject\">❌ Reject</a>\n      </div>\n    </div>\n    <div class=\"footer\">\n      Job ID: ${job.internal_job_id} • Single-use token secured\n    </div>\n  </div>\n</body>\n</html>\n`;\n\nreturn [{\n  json: {\n    ...job,\n    approval_token: token,\n    approval_version: version,\n    authorized_reviewer: reviewerEmail,\n    email_subject: `[TUDDEH APPROVAL] ${job.business_name} - ${job.marketing_job} (${job.content_format})`,\n    email_html: htmlBody\n  }\n}];"
+      },
+      "id": "wf09-prep-email-token",
+      "name": "Sign Action URLs & Build Email Template",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-60, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_content_jobs",
+          "mode": "id"
+        },
+        "matchColumns": ["internal_job_id"],
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "internal_job_id": "={{ $json.internal_job_id }}",
+            "drive_draft_folder_id": "={{ $json.drive_draft_folder_id }}",
+            "current_drive_location": "04 Generated Drafts",
+            "production_status": "Ready for Review",
+            "approval_token": "={{ $json.approval_token }}",
+            "approval_version": "={{ $json.approval_version }}",
+            "authorized_reviewer": "={{ $json.authorized_reviewer }}",
+            "updatedAt": "={{ $now.toISOString() }}"
+          }
+        }
+      },
+      "id": "wf09-update-job-state",
+      "name": "Store Draft & Token in tuddeh_content_jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [160, 200]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.authorized_reviewer }}",
+        "subject": "={{ $json.email_subject }}",
+        "message": "={{ $json.email_html }}",
+        "options": {}
+      },
+      "id": "wf09-send-gmail",
+      "name": "Send Approval Email (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [380, 200],
+      "credentials": {
+        "gmailOAuth2Api": {
+          "id": "gmailOAuth2Api",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Prepare Draft Package & Metadata", "type": "main", "index": 0 }]]
+    },
+    "Prepare Draft Package & Metadata": {
+      "main": [[{ "node": "Create Job Draft Folder in Drive", "type": "main", "index": 0 }]]
+    },
+    "Create Job Draft Folder in Drive": {
+      "main": [[{ "node": "Attach Draft Folder ID", "type": "main", "index": 0 }]]
+    },
+    "Attach Draft Folder ID": {
+      "main": [
+        [
+          { "node": "Update Sheet: Ready for Review", "type": "main", "index": 0 },
+          { "node": "Sign Action URLs & Build Email Template", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Sign Action URLs & Build Email Template": {
+      "main": [[{ "node": "Store Draft & Token in tuddeh_content_jobs", "type": "main", "index": 0 }]]
+    },
+    "Store Draft & Token in tuddeh_content_jobs": {
+      "main": [[{ "node": "Send Approval Email (Gmail)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

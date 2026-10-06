@@ -1,0 +1,2 @@
+id,config_key,config_value,description,updated_at
+1,AUTOMATION_MODE,ACTIVE,"Global automation control mode: ACTIVE | PAUSED | MAINTENANCE",2026-09-08T00:00:00.000Z

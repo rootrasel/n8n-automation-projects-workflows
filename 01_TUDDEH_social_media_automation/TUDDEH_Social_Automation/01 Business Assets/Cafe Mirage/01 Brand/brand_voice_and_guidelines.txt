@@ -1,0 +1,8 @@
+BUSINESS NAME: Cafe Mirage
+HANDLE: @cafemirage
+PRIMARY COLORS: #D4AF37 (Artisanal Gold), #0D0F12 (Obsidian Dark), #F5F5F5 (Warm Cream)
+TYPOGRAPHY: Headline: Inter Semi-Bold (600) | Body: Inter Regular (400)
+TAGLINE: "Artisanal Brews, Slow Moments, Downtown Warmth"
+TONE: Welcoming, sensory, sophisticated, neighborly, coffee-passionate
+HASHTAGS: #CafeMirage #ArtisanalCoffee #SpecialtyCoffee #EspressoBar #DowntownEats #PastryLove
+APPROVAL CONTACT: review@tuddeh.com

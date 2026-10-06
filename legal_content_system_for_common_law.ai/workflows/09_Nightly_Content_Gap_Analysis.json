@@ -1,0 +1,226 @@
+{
+  "name": "WF-09 Nightly Website Content Gap Analysis & Intelligence Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 1 * * *"
+            }
+          ]
+        }
+      },
+      "id": "wf09-cron-nightly-1am",
+      "name": "Nightly 1:00 AM Cron Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 200]
+    },
+    {
+      "parameters": {},
+      "id": "wf09-manual-trigger",
+      "name": "Manual Analysis Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, 40]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WORDPRESS_BASE_URL}}/wp-json/wp/v2/posts?per_page=100&_fields=id,title,categories,tags,slug",
+        "options": {}
+      },
+      "id": "wf09-fetch-all-wp-posts",
+      "name": "Crawl Live WordPress Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, 100],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WORDPRESS_BASE_URL}}/wp-json/wp/v2/categories?per_page=100",
+        "options": {}
+      },
+      "id": "wf09-fetch-wp-categories",
+      "name": "Fetch WordPress Categories",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, 260],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topic_Bank",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true
+        }
+      },
+      "id": "wf09-read-topic-bank",
+      "name": "Read Existing Topic Bank",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-960, 420],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Audit site taxonomy and identify state x practice area gaps\nconst posts = $items('Crawl Live WordPress Posts').map(p => p.json);\nconst categories = $items('Fetch WordPress Categories').map(c => c.json);\nconst existingBank = $items('Read Existing Topic Bank').map(t => (t.json.title_idea || '').toLowerCase());\n\nconst keyStates = ['Texas', 'Missouri', 'California', 'Florida', 'New York', 'Illinois', 'Georgia', 'Ohio', 'Pennsylvania', 'North Carolina'];\nconst practiceAreas = ['Family Law', 'Estate Planning', 'Corporate & LLC', 'Criminal Defense', 'Personal Injury', 'Employment Law', 'Real Estate Law'];\n\n// Matrix of coverage\nconst coverageMatrix = [];\n\nfor (const state of keyStates) {\n  for (const practice of practiceAreas) {\n    const matchCount = posts.filter(p => {\n      const text = `${p.title?.rendered || ''} ${p.slug || ''}`.toLowerCase();\n      return text.includes(state.toLowerCase()) && text.includes(practice.toLowerCase().split(' ')[0]);\n    }).length;\n\n    // If under target threshold (e.g. 5 articles minimum per combo)\n    if (matchCount < 5) {\n      coverageMatrix.push({\n        state: state,\n        practiceArea: practice,\n        currentCount: matchCount,\n        deficit: 5 - matchCount\n      });\n    }\n  }\n}\n\n// Sort by biggest deficits\ncoverageMatrix.sort((a, b) => b.deficit - a.deficit);\nconst topGaps = coverageMatrix.slice(0, 8);\n\nreturn [{\n  json: {\n    totalAuditedPosts: posts.length,\n    detectedGaps: topGaps,\n    existingTopicCount: existingBank.length\n  }\n}];"
+      },
+      "id": "wf09-calculate-gaps",
+      "name": "Compute Site Content Gaps",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-680, 200]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.6
+        },
+        "prompt": "=You are the Strategic Content Director for common-law.ai.\n\nOur nightly audit of common-law.ai has uncovered the following high-priority legal content deficits where our site lacks coverage:\n\n{{ JSON.stringify($json.detectedGaps) }}\n\nFor these identified deficits, generate 10 actionable, high-search-volume legal guide topics that real consumers actively search for.\n\nReturn ONLY a valid JSON array of objects with the exact schema:\n[\n  {\n    \"title_idea\": \"How to File for Uncontested Divorce in Missouri: Step-by-Step\",\n    \"primary_keyword\": \"uncontested divorce missouri process forms\",\n    \"target_state\": \"Missouri\",\n    \"practice_area\": \"Family Law\",\n    \"source_type\": \"gap_analysis\",\n    \"relevance_score\": 95,\n    \"notes\": \"Identified during nightly audit. Fills critical Missouri Family Law deficit.\"\n  }\n]"
+      },
+      "id": "wf09-openai-recommend-topics",
+      "name": "AI Formulate Gap-Closing Topics",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [-440, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-commonlaw-creds",
+          "name": "OpenAI CommonLaw API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI generated gap recommendations and format for Google Sheets\nconst raw = $json.message?.content || $json.text || '';\nlet recommendations = [];\n\ntry {\n  const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim();\n  recommendations = JSON.parse(cleaned);\n} catch (e) {\n  recommendations = [];\n}\n\nif (!Array.isArray(recommendations)) {\n  recommendations = [];\n}\n\nconst now = new Date().toISOString();\nconst rows = recommendations.map((item, idx) => ({\n  json: {\n    topic_id: `GAP-TOPIC-${Date.now()}-${idx + 1}`,\n    title_idea: item.title_idea || 'Legal Analysis Guide',\n    primary_keyword: item.primary_keyword || '',\n    target_state: item.target_state || 'Federal',\n    practice_area: item.practice_area || 'General Law',\n    source_type: 'gap_analysis',\n    relevance_score: Number(item.relevance_score) || 90,\n    status: 'NEW',\n    suggested_date: now.split('T')[0],\n    notes: item.notes || 'Generated from nightly content gap analysis audit.',\n    created_at: now\n  }\n}));\n\nreturn rows.length > 0 ? rows : [{ json: { status: 'NO_NEW_GAP_TOPICS' } }];"
+      },
+      "id": "wf09-format-gap-topics",
+      "name": "Format Gap Topics for Topic Bank",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-200, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-gap-items",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "NEW",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf09-if-valid-gap-topics",
+      "name": "IF Valid Gap Topics Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [40, 200]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topic_Bank",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "wf09-append-gap-topics-to-bank",
+      "name": "Append Gap Recommendations to Topic_Bank",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [280, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Nightly 1:00 AM Cron Trigger": {
+      "main": [
+        [
+          { "node": "Crawl Live WordPress Posts", "type": "main", "index": 0 },
+          { "node": "Fetch WordPress Categories", "type": "main", "index": 0 },
+          { "node": "Read Existing Topic Bank", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Manual Analysis Trigger": {
+      "main": [
+        [
+          { "node": "Crawl Live WordPress Posts", "type": "main", "index": 0 },
+          { "node": "Fetch WordPress Categories", "type": "main", "index": 0 },
+          { "node": "Read Existing Topic Bank", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Crawl Live WordPress Posts": {
+      "main": [[{ "node": "Compute Site Content Gaps", "type": "main", "index": 0 }]]
+    },
+    "Fetch WordPress Categories": {
+      "main": [[{ "node": "Compute Site Content Gaps", "type": "main", "index": 0 }]]
+    },
+    "Read Existing Topic Bank": {
+      "main": [[{ "node": "Compute Site Content Gaps", "type": "main", "index": 0 }]]
+    },
+    "Compute Site Content Gaps": {
+      "main": [[{ "node": "AI Formulate Gap-Closing Topics", "type": "main", "index": 0 }]]
+    },
+    "AI Formulate Gap-Closing Topics": {
+      "main": [[{ "node": "Format Gap Topics for Topic Bank", "type": "main", "index": 0 }]]
+    },
+    "Format Gap Topics for Topic Bank": {
+      "main": [[{ "node": "IF Valid Gap Topics Found", "type": "main", "index": 0 }]]
+    },
+    "IF Valid Gap Topics Found": {
+      "main": [
+        [{ "node": "Append Gap Recommendations to Topic_Bank", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

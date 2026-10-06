@@ -1,0 +1,13 @@
+{
+  "prompt_id": "PROMPT_REEL_TEMPLATE_V1",
+  "version": "v3.5",
+  "format": "Reel",
+  "aspect_ratio": "9:16",
+  "hook_style": "Curiosity or sensory pattern interrupt within the first 1.5 seconds",
+  "structure": {
+    "0-2s": "High-impact visual hook + bold on-screen question",
+    "2-10s": "Sensory buildup showcasing craft, process, or exclusive deal",
+    "10-15s": "Climax and clear localized CTA (e.g. 'Tap link in bio to claim')"
+  },
+  "caption_rules": "Max 3 punchy lines, warm narrative, 4-6 curated local hashtags, clear direct CTA."
+}

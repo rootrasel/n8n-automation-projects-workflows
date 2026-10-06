@@ -1,0 +1,174 @@
+{
+  "name": "WF-02 AI Article Generation, SEO, FAQ, Schema & Taxonomy",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf02-manual-trigger",
+      "name": "Manual / Sub-workflow Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, 200]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topic_Bank",
+          "mode": "name"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "field": "status",
+              "operator": "equals",
+              "value": "NEW"
+            }
+          ]
+        },
+        "options": {
+          "limit": 1
+        }
+      },
+      "id": "wf02-get-next-topic",
+      "name": "Get Next Available Topic from Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-980, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WORDPRESS_BASE_URL}}/wp-json/wp/v2/posts?per_page=15&_fields=id,title,link,slug",
+        "options": {}
+      },
+      "id": "wf02-fetch-existing-posts",
+      "name": "Fetch Live Posts for Internal Linking",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-740, 100],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Directory_Lookup",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true
+        }
+      },
+      "id": "wf02-read-directory-lookup",
+      "name": "Read Directory Lookup Table",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-740, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare context for AI generation\nconst topic = $items('Get Next Available Topic from Sheet')[0]?.json || {};\nconst livePosts = $items('Fetch Live Posts for Internal Linking').map(p => ({\n  id: p.json.id,\n  title: p.json.title?.rendered || 'Legal Article',\n  url: p.json.link || '',\n  slug: p.json.slug || ''\n}));\nconst directoryEntries = $items('Read Directory Lookup Table').map(d => d.json);\n\n// Determine Attorney Directory CTA behavior\nconst targetState = (topic.target_state || 'Federal').trim();\nconst practiceArea = (topic.practice_area || 'General Law').trim();\n\nconst matchingDirectory = directoryEntries.find(d => \n  d.state_name?.toLowerCase() === targetState.toLowerCase() &&\n  (d.practice_area?.toLowerCase() === practiceArea.toLowerCase() || d.practice_area?.toLowerCase() === 'all')\n);\n\nlet ctaConfig = {\n  hasAttorneys: false,\n  headline: 'Need Legal Assistance?',\n  subheadline: `Get matched with a vetted attorney in ${targetState}.`,\n  buttonText: 'Get Matched Now',\n  targetUrl: `${$env.WORDPRESS_BASE_URL || 'https://common-law.ai'}/get-matched/`\n};\n\nif (matchingDirectory && matchingDirectory.has_active_attorneys === 'TRUE') {\n  ctaConfig = {\n    hasAttorneys: true,\n    headline: matchingDirectory.cta_headline || `Need Legal Help in ${targetState}?`,\n    subheadline: `Find a verified ${targetState} ${practiceArea} attorney today.`,\n    buttonText: matchingDirectory.cta_button_text || `Find a ${targetState} Attorney`,\n    targetUrl: matchingDirectory.custom_directory_url || `${$env.WORDPRESS_BASE_URL || 'https://common-law.ai'}/attorneys/?state=${encodeURIComponent(targetState.toLowerCase())}`\n  };\n}\n\nreturn [{\n  json: {\n    topicId: topic.topic_id,\n    topicTitle: topic.title_idea,\n    primaryKeyword: topic.primary_keyword,\n    targetState: targetState,\n    practiceArea: practiceArea,\n    livePostsContext: livePosts.slice(0, 10),\n    ctaConfig: ctaConfig,\n    disclaimer: 'Disclaimer: The information provided in this article is for educational and informational purposes only and does not constitute formal legal advice. No attorney-client relationship is formed by reading this content. For specific legal issues, always consult a licensed attorney in your jurisdiction.'\n  }\n}];"
+      },
+      "id": "wf02-prep-prompt-context",
+      "name": "Prepare Context & Directory CTA Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, 200]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.5,
+          "maxTokens": 4000
+        },
+        "prompt": "=You are an elite legal author, SEO director, and WordPress content specialist for common-law.ai.\n\nGenerate an exhaustive, publication-ready legal article based on:\n- Target Topic: \"{{ $json.topicTitle }}\"\n- Primary Keyword: \"{{ $json.primaryKeyword }}\"\n- Target Jurisdiction/State: \"{{ $json.targetState }}\"\n- Practice Area: \"{{ $json.practiceArea }}\"\n- Internal Links Available on Site: {{ JSON.stringify($json.livePostsContext) }}\n- CTA Directive: {{ JSON.stringify($json.ctaConfig) }}\n- Required Legal Disclaimer: \"{{ $json.disclaimer }}\"\n\nOUTPUT INSTRUCTIONS:\nReturn ONLY a valid JSON object with the following exact keys:\n{\n  \"seo_title\": \"SEO and Browser Title (< 60 chars)\",\n  \"meta_description\": \"Compelling meta description with primary keyword (< 155 chars)\",\n  \"slug\": \"url-friendly-clean-slug\",\n  \"excerpt\": \"Crisp 2-sentence summary for previews and social feeds\",\n  \"h1\": \"Clean main article headline\",\n  \"article_html\": \"Full HTML article content. Must use standard <h2> and <h3> tags, <ul>, <ol>, <p>, and <strong>. Naturally integrate 2-3 contextual hyper-links using the provided site links where relevant. DO NOT include <h1> tag in article_html. Embed the CTA block and the Legal Disclaimer formatted in clean HTML at the end.\",\n  \"faq_items\": [\n    {\n      \"question\": \"Common consumer legal question?\",\n      \"answer\": \"Clear authoritative direct answer.\"\n    }\n  ],\n  \"json_ld_schema\": {\n    \"@context\": \"https://schema.org\",\n    \"@type\": \"Article\",\n    \"headline\": \"Headline\",\n    \"description\": \"Description\",\n    \"mainEntityOfPage\": \"https://common-law.ai/slug/\"\n  },\n  \"categories\": [\"State Name\", \"Practice Area\"],\n  \"tags\": [\"keyword1\", \"keyword2\", \"common law\", \"legal guide\"],\n  \"image_prompt\": \"Photorealistic, high-end editorial photograph depicting a modern courtroom or elegant law office setting in Missouri, cinematic lighting, ultra-detailed, professional 16:9 legal landscape, neutral tones, no distorted text, 1600x900 aesthetic\",\n  \"image_alt_text\": \"Descriptive alt text for the featured image explaining the legal theme\"\n}"
+      },
+      "id": "wf02-openai-generate-article",
+      "name": "OpenAI Full Legal Article Generation",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [-260, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-commonlaw-creds",
+          "name": "OpenAI CommonLaw API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate and parse the generated article payload\nconst raw = $json.message?.content || $json.text || '';\nlet articleData = {};\n\ntry {\n  const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim();\n  articleData = JSON.parse(cleaned);\n} catch (err) {\n  throw new Error(`Failed to parse AI article JSON: ${err.message}. Raw output snippet: ${raw.substring(0, 200)}`);\n}\n\nconst context = $items('Prepare Context & Directory CTA Logic')[0].json;\n\n// Build FAQ Schema snippet to append to JSON-LD\nlet faqSchema = null;\nif (Array.isArray(articleData.faq_items) && articleData.faq_items.length > 0) {\n  faqSchema = {\n    \"@context\": \"https://schema.org\",\n    \"@type\": \"FAQPage\",\n    \"mainEntity\": articleData.faq_items.map(faq => ({\n      \"@type\": \"Question\",\n      \"name\": faq.question,\n      \"acceptedAnswer\": {\n        \"@type\": \"Answer\",\n        \"text\": faq.answer\n      }\n    }))\n  };\n}\n\n// Dynamic CTA Banner HTML snippet\nconst cta = context.ctaConfig;\nconst ctaHtml = `\n<div class=\"commonlaw-attorney-cta\" style=\"margin: 40px 0; padding: 28px; background: linear-gradient(135deg, #1e293b, #0f172a); border-radius: 12px; color: #ffffff; text-align: center; border: 1px solid #334155; box-shadow: 0 4px 20px rgba(0,0,0,0.15);\">\n  <h3 style=\"color: #f8fafc; font-size: 22px; margin-bottom: 8px; font-weight: 700;\">${cta.headline}</h3>\n  <p style=\"color: #cbd5e1; font-size: 16px; margin-bottom: 20px;\">${cta.subheadline}</p>\n  <a href=\"${cta.targetUrl}\" style=\"display: inline-block; background-color: #2563eb; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; transition: background 0.2s;\">${cta.buttonText} &rarr;</a>\n</div>\n`;\n\n// Legal Disclaimer HTML snippet\nconst disclaimerHtml = `\n<div class=\"commonlaw-legal-disclaimer\" style=\"margin-top: 36px; padding: 16px 20px; background-color: #f1f5f9; border-left: 4px solid #64748b; font-size: 13px; color: #475569; font-style: italic;\">\n  ${context.disclaimer}\n</div>\n`;\n\n// FAQ Section HTML snippet\nlet faqHtml = '';\nif (Array.isArray(articleData.faq_items) && articleData.faq_items.length > 0) {\n  faqHtml = `\n  <div class=\"commonlaw-faq-section\" style=\"margin-top: 36px;\">\n    <h2>Frequently Asked Questions</h2>\n    ${articleData.faq_items.map(f => `\n      <div class=\"faq-item\" style=\"margin-bottom: 20px;\">\n        <h3 style=\"font-size: 18px; margin-bottom: 6px;\">${f.question}</h3>\n        <p>${f.answer}</p>\n      </div>\n    `).join('')}\n  </div>\n  `;\n}\n\n// Combine complete article HTML content\nconst fullHtmlContent = `\n${articleData.article_html || ''}\n${faqHtml}\n${ctaHtml}\n${disclaimerHtml}\n<script type=\"application/ld+json\">${JSON.stringify(articleData.json_ld_schema || {})}</script>\n${faqSchema ? `<script type=\"application/ld+json\">${JSON.stringify(faqSchema)}</script>` : ''}\n`.trim();\n\nreturn [{\n  json: {\n    topicId: context.topicId,\n    title: articleData.h1 || context.topicTitle,\n    seoTitle: articleData.seo_title || context.topicTitle,\n    metaDescription: articleData.meta_description || '',\n    slug: articleData.slug || context.topicTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),\n    excerpt: articleData.excerpt || '',\n    contentHtml: fullHtmlContent,\n    categories: articleData.categories || [context.targetState, context.practiceArea],\n    tags: articleData.tags || [context.primaryKeyword, 'common law'],\n    imagePrompt: articleData.image_prompt || `Professional legal consultation in ${context.targetState}, high detail, 1600x900 editorial aesthetic`,\n    imageAltText: articleData.image_alt_text || `${context.topicTitle} - common-law.ai`,\n    jsonLdSchema: articleData.json_ld_schema,\n    targetState: context.targetState,\n    practiceArea: context.practiceArea\n  }\n}];"
+      },
+      "id": "wf02-assemble-article-payload",
+      "name": "Assemble Final Article HTML & Meta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-20, 200]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf03-featured-image-generator",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf02-call-image-workflow",
+      "name": "Call WF-03 Featured Image Generator",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [220, 200]
+    }
+  ],
+  "connections": {
+    "Manual / Sub-workflow Trigger": {
+      "main": [[{ "node": "Get Next Available Topic from Sheet", "type": "main", "index": 0 }]]
+    },
+    "Get Next Available Topic from Sheet": {
+      "main": [
+        [
+          { "node": "Fetch Live Posts for Internal Linking", "type": "main", "index": 0 },
+          { "node": "Read Directory Lookup Table", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch Live Posts for Internal Linking": {
+      "main": [[{ "node": "Prepare Context & Directory CTA Logic", "type": "main", "index": 0 }]]
+    },
+    "Read Directory Lookup Table": {
+      "main": [[{ "node": "Prepare Context & Directory CTA Logic", "type": "main", "index": 0 }]]
+    },
+    "Prepare Context & Directory CTA Logic": {
+      "main": [[{ "node": "OpenAI Full Legal Article Generation", "type": "main", "index": 0 }]]
+    },
+    "OpenAI Full Legal Article Generation": {
+      "main": [[{ "node": "Assemble Final Article HTML & Meta", "type": "main", "index": 0 }]]
+    },
+    "Assemble Final Article HTML & Meta": {
+      "main": [[{ "node": "Call WF-03 Featured Image Generator", "type": "main", "index": 0 }]]
+    }
+  }
+}

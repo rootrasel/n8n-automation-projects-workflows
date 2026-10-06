@@ -1,0 +1,8 @@
+preset_id,family,headline_color,body_color,overlay_color,overlay_opacity,accent_color,cta_bg_color,cta_text_color,logo_treatment,lower_third_treatment,border_treatment,typography_rules,description
+BUSINESS_V1,BUSINESS,#FFFFFF,#E0E0E0,#0D0F12,0.65,#D4AF37,#D4AF37,#0D0F12,TOP_RIGHT_CLEAN,MINIMAL_DARK,NONE,"Inter, Semi-Bold 600, Minimal Text","Standard brand & business spotlight preset"
+DEAL_V1,DEAL,#FFFFFF,#F5F5F5,#1A0A00,0.75,#FF6B35,#FF6B35,#FFFFFF,TOP_RIGHT_BADGE,HIGHLIGHT_TAG,ACCENT_PILL,"Outfit, Bold 700, Urgent CTA","High contrast deal & discount offer preset"
+EVENT_V1,EVENT,#FFFFFF,#EDE8F5,#180E29,0.70,#9B5DE5,#9B5DE5,#FFFFFF,CORNER_SUBTLE,CALENDAR_DATE_CARD,PURPLE_GLOW,"Outfit, Medium 500, Experience-First","Live events, weekend happenings, and special dates"
+EGIFT_V1,EGIFT,#FFFFFF,#F3F7F0,#0B2016,0.68,#2EC4B6,#2EC4B6,#FFFFFF,TOP_CENTER_EMBOSS,GIFT_RIBBON,EMERALD_ACCENT,"Inter, Bold 700, Gifting Focus","Digital gift cards, rewards, and vouchers"
+BIRTHDAY_V1,BIRTHDAY,#FFFFFF,#FFF9E6,#2B1800,0.72,#FFB703,#FFB703,#2B1800,TOP_RIGHT_CONFETTI,CELEBRATION_BANNER,GOLD_OUTLINE,"Inter, Extra-Bold 800, Festive","Birthday perks, VIP club, and celebrations"
+STORY_V1,STORY,#FFFFFF,#E8E8E8,#000000,0.50,#F72585,#F72585,#FFFFFF,TOP_LEFT_STORY,TAP_NEXT_CTA,SAFE_ZONE_MARGIN,"Inter, Semi-Bold 600, 9:16 Vertical Safe Zones","Fast-consumption 9:16 interactive story cards"
+CAROUSEL_V1,CAROUSEL,#FFFFFF,#EEEEEE,#111111,0.60,#4361EE,#4361EE,#FFFFFF,CONSISTENT_PAGE_HEADER,SLIDE_PAGINATION,CLEAN_DIVIDER,"Inter, Medium 500, 4:5 Aspect Ratio Multi-Slide","Multi-slide episodic cards with cohesive layout"

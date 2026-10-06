@@ -1,0 +1,688 @@
+{
+  "name": "WF-00 Business Folder Provisioning",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "wf00-trigger-schedule",
+      "name": "Schedule Trigger (Hourly)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 200]
+    },
+    {
+      "parameters": {},
+      "id": "wf00-trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, 40]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Businesses",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "wf00-read-businesses",
+      "name": "Read Businesses Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-980, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-active",
+              "leftValue": "={{ $json.Status }}",
+              "rightValue": "Active",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf00-filter-active",
+      "name": "Filter Status = Active",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [-760, 100]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "wf00-split-batches",
+      "name": "One Business At A Time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [-540, 100]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_business_registry",
+          "mode": "id"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "field": "business_id",
+              "operator": "equals",
+              "value": "={{ $json['Business ID'] }}"
+            }
+          ]
+        }
+      },
+      "id": "wf00-check-registry",
+      "name": "Check tuddeh_business_registry",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-320, 100],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-has-mapping",
+              "leftValue": "={{ $json.root_drive_id ? $json.root_drive_id : '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "cond-status-completed",
+              "leftValue": "={{ $json.provisioning_status ? $json.provisioning_status : '' }}",
+              "rightValue": "COMPLETED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf00-if-mapping-exists",
+      "name": "IF Valid Mapping Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-100, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mapping already complete. Ensure human folder link exists in Businesses tab\nconst biz = $('One Business At A Time').first().json;\nconst reg = $json;\nconst expectedUrl = `https://drive.google.com/drive/folders/${reg.root_drive_id}`;\nconst currentUrl = biz['Google Drive Asset Library'] || '';\nconst needsSheetUpdate = currentUrl.trim() !== expectedUrl;\n\nreturn [{\n  json: {\n    business_id: biz['Business ID'],\n    business_name: biz['Business'],\n    root_drive_id: reg.root_drive_id,\n    folder_url: expectedUrl,\n    needsSheetUpdate,\n    status: 'ALREADY_PROVISIONED'\n  }\n}];"
+      },
+      "id": "wf00-check-existing-url",
+      "name": "Check Existing Drive URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [160, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-needs-url-update",
+              "leftValue": "={{ $json.needsSheetUpdate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf00-if-update-needed",
+      "name": "IF Needs Sheet Update",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [380, 0]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Businesses",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Business ID",
+        "valueToMatchOn": "={{ $json.business_id }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Google Drive Asset Library",
+              "fieldValue": "={{ $json.folder_url }}"
+            }
+          ]
+        }
+      },
+      "id": "wf00-update-sheet-url-only",
+      "name": "Sync Folder URL to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [620, -60],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare search for business folder under 01 Business Assets\nconst biz = $('One Business At A Time').first().json;\nconst masterParentId = $env.DRIVE_01_BUSINESS_ASSETS_FOLDER_ID || '01_BUSINESS_ASSETS_MASTER_ID';\nreturn [{\n  json: {\n    business_id: biz['Business ID'],\n    business_name: biz['Business'],\n    master_parent_id: masterParentId\n  }\n}];"
+      },
+      "id": "wf00-prep-search",
+      "name": "Prepare Root Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [160, 240]
+    },
+    {
+      "parameters": {
+        "resource": "fileOrFolder",
+        "operation": "search",
+        "queryString": "='name = \"' + $json.business_name + '\" and \"' + $json.master_parent_id + '\" in parents and mimeType = \"application/vnd.google-apps.folder\" and trashed = false'",
+        "options": {}
+      },
+      "id": "wf00-search-root-folder",
+      "name": "Search Business Root Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [380, 240],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "googleDriveOAuth2Api",
+          "name": "Google Drive account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst valid = items.filter(i => i.json && i.json.id);\nconst prep = $('Prepare Root Search').first().json;\nreturn [{\n  json: {\n    business_id: prep.business_id,\n    business_name: prep.business_name,\n    master_parent_id: prep.master_parent_id,\n    found_count: valid.length,\n    existing_root_id: valid.length > 0 ? valid[0].json.id : null\n  }\n}];"
+      },
+      "id": "wf00-eval-root-search",
+      "name": "Evaluate Root Match",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-found-root",
+              "leftValue": "={{ $json.found_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf00-if-root-found",
+      "name": "IF Root Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [820, 240]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "operation": "create",
+        "name": "={{ $json.business_name }}",
+        "options": {
+          "parents": ["={{ $json.master_parent_id }}"]
+        }
+      },
+      "id": "wf00-create-root-folder",
+      "name": "Create Business Root Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1060, 320],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "googleDriveOAuth2Api",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare list of 5 standardized subfolders\nconst evalRoot = $('Evaluate Root Match').first().json;\nconst createdRoot = $input.item?.json?.id ? $input.item.json : null;\nconst rootId = createdRoot ? createdRoot.id : evalRoot.existing_root_id;\n\nconst subfolders = [\n  { name: '01 Brand', key: 'brand_folder_id' },\n  { name: '02 Photos', key: 'photos_folder_id' },\n  { name: '03 Videos', key: 'videos_folder_id' },\n  { name: '04 Reference', key: 'reference_folder_id' },\n  { name: '05 Archive', key: 'archive_folder_id' }\n];\n\nreturn subfolders.map(sf => ({\n  json: {\n    business_id: evalRoot.business_id,\n    business_name: evalRoot.business_name,\n    root_drive_id: rootId,\n    subfolder_name: sf.name,\n    subfolder_key: sf.key\n  }\n}));"
+      },
+      "id": "wf00-prep-subfolders",
+      "name": "Prepare 5 Subfolder Queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 240]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "wf00-split-subfolders",
+      "name": "One Subfolder At A Time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1520, 240]
+    },
+    {
+      "parameters": {
+        "resource": "fileOrFolder",
+        "operation": "search",
+        "queryString": "='name = \"' + $json.subfolder_name + '\" and \"' + $json.root_drive_id + '\" in parents and mimeType = \"application/vnd.google-apps.folder\" and trashed = false'",
+        "options": {}
+      },
+      "id": "wf00-search-subfolder",
+      "name": "Search Existing Subfolder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1740, 240],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "googleDriveOAuth2Api",
+          "name": "Google Drive account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst valid = items.filter(i => i.json && i.json.id);\nconst sf = $('One Subfolder At A Time').first().json;\n\nreturn [{\n  json: {\n    business_id: sf.business_id,\n    business_name: sf.business_name,\n    root_drive_id: sf.root_drive_id,\n    subfolder_name: sf.subfolder_name,\n    subfolder_key: sf.subfolder_key,\n    found: valid.length > 0,\n    subfolder_id: valid.length > 0 ? valid[0].json.id : null\n  }\n}];"
+      },
+      "id": "wf00-eval-subfolder",
+      "name": "Evaluate Subfolder Match",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1960, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-sf-found",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf00-if-subfolder-exists",
+      "name": "IF Subfolder Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2180, 240]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "operation": "create",
+        "name": "={{ $json.subfolder_name }}",
+        "options": {
+          "parents": ["={{ $json.root_drive_id }}"]
+        }
+      },
+      "id": "wf00-create-subfolder",
+      "name": "Create Missing Subfolder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [2400, 320],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "googleDriveOAuth2Api",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const evalSf = $('Evaluate Subfolder Match').first().json;\nconst created = $input.item?.json?.id ? $input.item.json : null;\nconst sfId = created ? created.id : evalSf.subfolder_id;\n\nreturn [{\n  json: {\n    business_id: evalSf.business_id,\n    business_name: evalSf.business_name,\n    root_drive_id: evalSf.root_drive_id,\n    subfolder_name: evalSf.subfolder_name,\n    subfolder_key: evalSf.subfolder_key,\n    final_subfolder_id: sfId\n  }\n}];"
+      },
+      "id": "wf00-collect-subfolder-id",
+      "name": "Collect Subfolder ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2620, 240]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "wf00-aggregate-subfolders",
+      "name": "Aggregate All Subfolders",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1740, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "const all = $input.all();\nconst items = all.map(i => i.json);\nif (!items.length) throw new Error('No subfolders processed');\n\nconst first = items[0];\nconst map = {\n  business_id: first.business_id,\n  business_name: first.business_name,\n  root_drive_id: first.root_drive_id\n};\n\nfor (const item of items) {\n  map[item.subfolder_key] = item.final_subfolder_id;\n}\n\nconst required = ['brand_folder_id', 'photos_folder_id', 'videos_folder_id', 'reference_folder_id', 'archive_folder_id'];\nconst missing = required.filter(k => !map[k]);\n\nif (missing.length > 0 || !map.root_drive_id) {\n  map.provisioning_status = 'INCOMPLETE';\n  map.error_reason = `Missing IDs for: ${missing.join(', ')}`;\n} else {\n  map.provisioning_status = 'COMPLETED';\n  map.folder_url = `https://drive.google.com/drive/folders/${map.root_drive_id}`;\n  map.updatedAt = new Date().toISOString();\n}\n\nreturn [{ json: map }];"
+      },
+      "id": "wf00-build-registry-row",
+      "name": "Build Registry Row & Verify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 480]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-completed",
+              "leftValue": "={{ $json.provisioning_status }}",
+              "rightValue": "COMPLETED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf00-if-verified",
+      "name": "IF All Folders Verified",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2200, 480]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_business_registry",
+          "mode": "id"
+        },
+        "matchColumns": ["business_id"],
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      },
+      "id": "wf00-upsert-registry",
+      "name": "Upsert tuddeh_business_registry",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [2440, 440]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Businesses",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Business ID",
+        "valueToMatchOn": "={{ $json.business_id }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Google Drive Asset Library",
+              "fieldValue": "={{ $json.folder_url }}"
+            }
+          ]
+        }
+      },
+      "id": "wf00-update-business-sheet",
+      "name": "Update Businesses Sheet URL",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2680, 440],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_error_log",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "error_id": "=ERR_PROV_{{$now.toMillis()}}",
+            "timestamp": "={{$now.toISOString()}}",
+            "workflow": "WF-00",
+            "business": "={{$json.business_name}}",
+            "node": "Verify All Folders",
+            "error_type": "BUSINESS_RULE",
+            "error_message": "={{$json.error_reason}}",
+            "resolved": false
+          }
+        }
+      },
+      "id": "wf00-log-incomplete",
+      "name": "Log Incomplete Provisioning",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [2440, 580]
+    },
+    {
+      "parameters": {},
+      "id": "wf00-next-business",
+      "name": "Next Business",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2920, 200]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Hourly)": {
+      "main": [[{ "node": "Read Businesses Sheet", "type": "main", "index": 0 }]]
+    },
+    "Manual Trigger": {
+      "main": [[{ "node": "Read Businesses Sheet", "type": "main", "index": 0 }]]
+    },
+    "Read Businesses Sheet": {
+      "main": [[{ "node": "Filter Status = Active", "type": "main", "index": 0 }]]
+    },
+    "Filter Status = Active": {
+      "main": [[{ "node": "One Business At A Time", "type": "main", "index": 0 }]]
+    },
+    "One Business At A Time": {
+      "main": [
+        [],
+        [{ "node": "Check tuddeh_business_registry", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check tuddeh_business_registry": {
+      "main": [[{ "node": "IF Valid Mapping Exists", "type": "main", "index": 0 }]]
+    },
+    "IF Valid Mapping Exists": {
+      "main": [
+        [{ "node": "Check Existing Drive URL", "type": "main", "index": 0 }],
+        [{ "node": "Prepare Root Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Existing Drive URL": {
+      "main": [[{ "node": "IF Needs Sheet Update", "type": "main", "index": 0 }]]
+    },
+    "IF Needs Sheet Update": {
+      "main": [
+        [{ "node": "Sync Folder URL to Sheet", "type": "main", "index": 0 }],
+        [{ "node": "Next Business", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sync Folder URL to Sheet": {
+      "main": [[{ "node": "Next Business", "type": "main", "index": 0 }]]
+    },
+    "Prepare Root Search": {
+      "main": [[{ "node": "Search Business Root Folder", "type": "main", "index": 0 }]]
+    },
+    "Search Business Root Folder": {
+      "main": [[{ "node": "Evaluate Root Match", "type": "main", "index": 0 }]]
+    },
+    "Evaluate Root Match": {
+      "main": [[{ "node": "IF Root Exists", "type": "main", "index": 0 }]]
+    },
+    "IF Root Exists": {
+      "main": [
+        [{ "node": "Prepare 5 Subfolder Queue", "type": "main", "index": 0 }],
+        [{ "node": "Create Business Root Folder", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Business Root Folder": {
+      "main": [[{ "node": "Prepare 5 Subfolder Queue", "type": "main", "index": 0 }]]
+    },
+    "Prepare 5 Subfolder Queue": {
+      "main": [[{ "node": "One Subfolder At A Time", "type": "main", "index": 0 }]]
+    },
+    "One Subfolder At A Time": {
+      "main": [
+        [{ "node": "Aggregate All Subfolders", "type": "main", "index": 0 }],
+        [{ "node": "Search Existing Subfolder", "type": "main", "index": 0 }]
+      ]
+    },
+    "Search Existing Subfolder": {
+      "main": [[{ "node": "Evaluate Subfolder Match", "type": "main", "index": 0 }]]
+    },
+    "Evaluate Subfolder Match": {
+      "main": [[{ "node": "IF Subfolder Exists", "type": "main", "index": 0 }]]
+    },
+    "IF Subfolder Exists": {
+      "main": [
+        [{ "node": "Collect Subfolder ID", "type": "main", "index": 0 }],
+        [{ "node": "Create Missing Subfolder", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Missing Subfolder": {
+      "main": [[{ "node": "Collect Subfolder ID", "type": "main", "index": 0 }]]
+    },
+    "Collect Subfolder ID": {
+      "main": [[{ "node": "One Subfolder At A Time", "type": "main", "index": 0 }]]
+    },
+    "Aggregate All Subfolders": {
+      "main": [[{ "node": "Build Registry Row & Verify", "type": "main", "index": 0 }]]
+    },
+    "Build Registry Row & Verify": {
+      "main": [[{ "node": "IF All Folders Verified", "type": "main", "index": 0 }]]
+    },
+    "IF All Folders Verified": {
+      "main": [
+        [{ "node": "Upsert tuddeh_business_registry", "type": "main", "index": 0 }],
+        [{ "node": "Log Incomplete Provisioning", "type": "main", "index": 0 }]
+      ]
+    },
+    "Upsert tuddeh_business_registry": {
+      "main": [[{ "node": "Update Businesses Sheet URL", "type": "main", "index": 0 }]]
+    },
+    "Update Businesses Sheet URL": {
+      "main": [[{ "node": "Next Business", "type": "main", "index": 0 }]]
+    },
+    "Log Incomplete Provisioning": {
+      "main": [[{ "node": "Next Business", "type": "main", "index": 0 }]]
+    },
+    "Next Business": {
+      "main": [[{ "node": "One Business At A Time", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

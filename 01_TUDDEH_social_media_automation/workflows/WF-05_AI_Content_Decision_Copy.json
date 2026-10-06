@@ -1,0 +1,499 @@
+{
+  "name": "WF-05 AI Content Decision & Generation Engine",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf05-trigger-parent",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [-1320, 100]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_creative_history",
+          "mode": "id"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "business_id",
+              "keyValue": "={{ $json.business_id }}"
+            }
+          ]
+        }
+      },
+      "id": "wf05-get-creative-history",
+      "name": "Get Recent Creative History",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-1100, 100],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_style_presets",
+          "mode": "id"
+        }
+      },
+      "id": "wf05-get-presets",
+      "name": "Get All Style Presets",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [-880, 100],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deterministic Style Preset Resolution and Master Prompt Preparation (formerly WF-04)\nconst job = $('Execute Workflow Trigger').first().json;\nconst presets = $input.all().map(i => i.json).filter(p => p && p.preset_id);\n\nconst presetMap = {};\nfor (const p of presets) {\n  presetMap[String(p.preset_id).toUpperCase().trim()] = p;\n}\n\nconst focus = String(job.content_focus || '').toLowerCase();\nconst format = String(job.content_format || '').toLowerCase();\nconst template = String(job.prompt_template || '').trim();\nconst templateUpper = template.toUpperCase();\n\n// 1. Direct match check: allow adding new presets without rebuilding workflow\nlet selectedPresetId = '';\nif (job.style_preset_id && presetMap[String(job.style_preset_id).toUpperCase()]) {\n  selectedPresetId = String(job.style_preset_id).toUpperCase();\n} else if (presetMap[templateUpper]) {\n  selectedPresetId = templateUpper;\n} else if (focus.includes('deal') || focus.includes('discount') || template.toLowerCase().includes('deal')) {\n  selectedPresetId = 'DEAL_V1';\n} else if (focus.includes('event') || focus.includes('happening') || template.toLowerCase().includes('event')) {\n  selectedPresetId = 'EVENT_V1';\n} else if (focus.includes('gift') || focus.includes('voucher') || template.toLowerCase().includes('gift')) {\n  selectedPresetId = 'EGIFT_V1';\n} else if (focus.includes('birthday') || focus.includes('celebration') || template.toLowerCase().includes('birthday')) {\n  selectedPresetId = 'BIRTHDAY_V1';\n} else if (format === 'story') {\n  selectedPresetId = 'STORY_V1';\n} else if (format === 'carousel') {\n  selectedPresetId = 'CAROUSEL_V1';\n} else {\n  selectedPresetId = 'BUSINESS_V1';\n}\n\n// 2. Fetch resolved preset configuration\nconst resolvedPreset = presetMap[selectedPresetId] || {\n  preset_id: selectedPresetId,\n  headline_color: '#FFFFFF',\n  body_color: '#E0E0E0',\n  overlay_color: '#0D0F12',\n  overlay_opacity: 0.65,\n  accent_color: '#D4AF37',\n  cta_bg_color: '#D4AF37',\n  cta_text_color: '#0D0F12',\n  logo_treatment: 'TOP_RIGHT_CLEAN',\n  lower_third_treatment: 'MINIMAL_DARK',\n  border_treatment: 'NONE',\n  typography_rules: 'Inter, Semi-Bold 600, Minimal Text'\n};\n\nconst promptId = `PROMPT_${templateUpper.replace(/[^A-Z0-9]/g, '_') || 'GENERAL'}`;\nconst promptVersion = 'v3.5';\n\nreturn [{\n  json: {\n    ...job,\n    style_preset_id: selectedPresetId,\n    style_preset: resolvedPreset,\n    prompt_id: promptId,\n    prompt_version: promptVersion,\n    prompt_template_name: template,\n    preset_resolved_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "wf05-resolve-preset",
+      "name": "Resolve Preset & Style Tokens",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-660, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $('Resolve Preset & Style Tokens').first().json;\nconst historyRows = $('Get Recent Creative History').all().map(i => i.json).filter(h => h && (h.hook || h.concept));\n\n// Take up to 10 most recent records containing full semantic context\nconst recentSlice = historyRows.slice(-10).map(h => ({\n  hook: h.hook || '',\n  concept: h.concept || '',\n  angle: h.creative_direction || '',\n  promoted_listing: h.promoted_listing_id || '',\n  content_format: h.content_format || '',\n  selected_assets: h.selected_assets || [],\n  created_at: h.created_at || ''\n}));\n\nconst systemPrompt = `You are TUDDEH's chief creative strategist and executive copywriter.\\n` +\n`Generate an experience-first, authentic, high-converting social media package in strict JSON.\\n` +\n`TUDDEH Brand Rules:\\n` +\n`- Experience-first, sensory storytelling. Never sound like cheap marketing hype.\\n` +\n`- On-screen text overlays must be short, punchy, and minimal (max 1-3 lines).\\n` +\n`- SEMANTIC DUPLICATION PREVENTION: Materially vary the hook, angle, and narrative concept from the recent history provided.\\n` +\n`- Strictly output valid JSON matching the requested schema.`;\n\nconst userPayload = {\n  business_name: job.business_name,\n  category: job.category || 'Hospitality/Lifestyle',\n  content_focus: job.content_focus,\n  content_format: job.content_format,\n  selected_listing: job.resolved_listing || null,\n  creative_direction_guidance: job.creative_direction || '',\n  style_preset_id: job.style_preset_id,\n  style_preset_tokens: job.style_preset,\n  candidate_assets: (job.selected_candidate_assets || []).map(a => ({ id: a.id, name: a.name })),\n  recent_creative_history_to_avoid: recentSlice,\n  revision_notes: job.revision_notes || '',\n  required_schema: {\n    headline: 'Short, magnetic hook / headline',\n    experience_line: 'One evocative sentence capturing the physical atmosphere and experience',\n    caption: 'Compelling 2-3 paragraph caption written for human connection',\n    hashtags: ['3-5 specific niche and local tags, no generic tag spam'],\n    CTA: 'Direct and natural call to action',\n    on_screen_text: ['Line 1', 'Line 2 (optional)'],\n    selected_assets: ['Chosen asset IDs from candidate_assets'],\n    creative_direction: 'Concise summary of the visual concept and hook angle',\n    recommended_publish_date: 'YYYY-MM-DD (optimal date in next 2-5 days)',\n    recommended_publish_time: 'HH:MM (e.g. 11:30, 18:45)'\n  }\n};\n\nreturn [{\n  json: {\n    ...job,\n    ai_system_prompt: systemPrompt,\n    ai_user_payload: JSON.stringify(userPayload),\n    recent_history: recentSlice\n  }\n}];"
+      },
+      "id": "wf05-prep-ai-payload",
+      "name": "Build Creative Request Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-440, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.OPENAI_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    { \"role\": \"system\", \"content\": {{$json.ai_system_prompt}} },\n    { \"role\": \"user\", \"content\": {{$json.ai_user_payload}} }\n  ],\n  \"temperature\": 0.7\n}",
+        "options": {}
+      },
+      "id": "wf05-openai-request",
+      "name": "OpenAI Structured Content API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-220, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawContent = $json.choices?.[0]?.message?.content;\nif (!rawContent) throw new Error('OpenAI returned empty response.');\n\nlet parsed;\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (e) {\n  throw new Error(`Failed to parse OpenAI JSON response: ${e.message}`);\n}\n\nconst prep = $('Build Creative Request Payload').first().json;\nconst history = prep.recent_history || [];\n\nconst newHook = String(parsed.headline || parsed.experience_line || '').trim().toLowerCase();\nconst newConcept = String(parsed.creative_direction || '').trim().toLowerCase();\n\n// Verify that the output does not closely mirror recent history\nconst isDuplicate = history.some(h => {\n  const prevHook = String(h.hook || '').trim().toLowerCase();\n  const prevConcept = String(h.concept || h.angle || '').trim().toLowerCase();\n  return (newHook && prevHook && (newHook.includes(prevHook) || prevHook.includes(newHook))) ||\n         (newConcept && prevConcept && (newConcept.includes(prevConcept) || prevConcept.includes(newConcept)));\n});\n\nreturn [{\n  json: {\n    ...prep,\n    ai_package: parsed,\n    semantic_duplicate_detected: isDuplicate,\n    recommended_publish_date: parsed.recommended_publish_date || new Date().toISOString().split('T')[0],\n    recommended_publish_time: parsed.recommended_publish_time || '12:00'\n  }\n}];"
+      },
+      "id": "wf05-parse-and-check-duplication",
+      "name": "Parse & Semantic Anti-Dup Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-no-dup",
+              "leftValue": "={{ $json.semantic_duplicate_detected }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf05-if-no-duplication",
+      "name": "IF No Semantic Duplication",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [220, 100]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tuddeh_creative_history",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "business_id": "={{ $json.business_id }}",
+            "internal_job_id": "={{ $json.internal_job_id }}",
+            "hook": "={{ $json.ai_package.headline }}",
+            "concept": "={{ $json.ai_package.experience_line }}",
+            "creative_direction": "={{ $json.ai_package.creative_direction }}",
+            "promoted_listing_id": "={{ $json.selected_listing }}",
+            "content_format": "={{ $json.content_format }}",
+            "selected_assets": "={{ JSON.stringify($json.ai_package.selected_assets || []) }}",
+            "created_at": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf05-save-creative-history",
+      "name": "Record in Creative History",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [440, 40]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Marketing Job",
+        "valueToMatchOn": "={{ $json.marketing_job }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Recommended Publish Date",
+              "fieldValue": "={{ $json.recommended_publish_date }}"
+            },
+            {
+              "fieldId": "Recommended Publish Time",
+              "fieldValue": "={{ $json.recommended_publish_time }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf05-write-recommended-datetime",
+      "name": "Write Recommended Date/Time to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [660, 40],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.content_format }}",
+                    "rightValue": "Reel",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.content_format }}",
+                    "rightValue": "Static Image",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      },
+      "id": "wf05-route-format",
+      "name": "Route by Content Format",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [880, 40]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Direct Video Asset Selection (formerly WF-07)\nconst job = $json;\nconst aiPkg = job.ai_package || {};\nconst candidateAssets = job.approved_assets || job.selected_candidate_assets || [];\n\n// Resolve source video ID from AI selection or candidate assets\nlet heroAsset = (candidateAssets.find(a => a.id === (aiPkg.selected_assets && aiPkg.selected_assets[0]))) || candidateAssets[0];\n\nif (!heroAsset || !heroAsset.id) {\n  throw new Error('WF-05 Reel Generation: No source video asset found in candidate media.');\n}\n\nconst safeJobId = String(job.internal_job_id || 'JOB').replace(/[^a-zA-Z0-9_]/g, '');\nconst filename = `${safeJobId}_${heroAsset.name || 'VIDEO.mp4'}`;\n\nreturn [{\n  json: {\n    ...job,\n    hero_asset: heroAsset,\n    rendered_filename: filename,\n    rendered_type: 'VIDEO',\n    media_format: 'mp4',\n    source_video_id: heroAsset.id,\n    source_video_name: heroAsset.name,\n    source_video_url: `https://drive.google.com/file/d/${heroAsset.id}/view`,\n    render_verified: true,\n    video_editing_status: 'DIRECT_PASSTHROUGH',\n    rendered_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "wf05-format-video-passthrough",
+      "name": "Process Reel Video Asset",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare prompt for OpenAI Image API (DALL-E 3) incorporating style preset (formerly WF-06)\nconst job = $json;\nconst preset = job.style_preset || {};\nconst pkg = job.ai_package || {};\nconst presetId = String(job.style_preset_id || 'BUSINESS_V1').toUpperCase();\n\nlet thematicGuidance = '';\nif (presetId.includes('DEAL')) {\n  thematicGuidance = 'Highlighting a hero offering or signature dining/retail feature, crisp focus, minimalist premium setting, inviting atmosphere with clear negative space.';\n} else if (presetId.includes('EVENT')) {\n  thematicGuidance = 'Atmospheric ambient lighting, subtle depth of field, warm social celebration, capturing authentic energy and venue texture.';\n} else if (presetId.includes('EGIFT')) {\n  thematicGuidance = 'Sophisticated editorial lifestyle presentation, giftable luxury aesthetic, elegant and restrained composition.';\n} else if (presetId.includes('BIRTHDAY')) {\n  thematicGuidance = 'Subtle celebratory bokeh, warm golden hour tones, celebratory and joyful yet refined hospitality vibe.';\n} else {\n  thematicGuidance = 'Architectural, environmental interior and exterior authenticity, timeless craft and hospitality presentation.';\n}\n\nconst accentTone = preset.accent_color || '#D4AF37';\nconst concept = pkg.creative_direction || pkg.experience_line || `Experience ${job.business_name}`;\n\nconst imagePrompt = `High-end commercial editorial photography for ${job.business_name}. ` +\n  `Visual Concept: ${concept}. ` +\n  `Art Direction: ${thematicGuidance} ` +\n  `Color Palette: Subtle natural warmth with harmonic accents around ${accentTone}. ` +\n  `Execution rules: Shot on professional 35mm lens, f/2.4, natural diffused lighting. ` +\n  `CRITICAL BRAND RULE: Absolutely NO text overlays, NO graphic banners, NO artificial icons, NO watermark, photorealistic commercial look.`;\n\nconst rev = Number(job.approval_version || job.current_revision || 1);\nconst safeBiz = String(job.business_name || 'BIZ').replace(/[^a-zA-Z0-9]/g, '_');\nconst filename = `STATIC_${safeBiz}_${job.internal_job_id}_REV${rev}.png`;\n\nreturn [{\n  json: {\n    ...job,\n    image_api_prompt: imagePrompt,\n    target_filename: filename,\n    current_revision: rev\n  }\n}];"
+      },
+      "id": "wf05-prep-image-prompt",
+      "name": "Prepare Static Image Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 40]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.OPENAI_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"dall-e-3\",\n  \"prompt\": {{ JSON.stringify($json.image_api_prompt) }},\n  \"n\": 1,\n  \"size\": \"1024x1024\",\n  \"quality\": \"standard\",\n  \"response_format\": \"b64_json\"\n}",
+        "options": {}
+      },
+      "id": "wf05-dalle-request",
+      "name": "OpenAI Image API Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 40]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json;\nconst b64 = response.data?.[0]?.b64_json;\nconst job = $('Prepare Static Image Prompt').first().json;\n\nif (!b64) {\n  throw new Error('OpenAI Image API did not return base64 image data.');\n}\n\nconst filename = job.target_filename;\n\nreturn [{\n  json: {\n    ...job,\n    rendered_filename: filename,\n    rendered_type: 'STATIC_IMAGE',\n    media_format: 'png',\n    generated_at: new Date().toISOString()\n  },\n  binary: {\n    data: {\n      data: b64,\n      mimeType: 'image/png',\n      fileName: filename\n    }\n  }\n}];"
+      },
+      "id": "wf05-process-image-binary",
+      "name": "Process Image Binary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 40]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Story and Carousel Builder (formerly WF-08)\nconst job = $json;\nconst format = String(job.content_format || '').toLowerCase();\nconst preset = job.style_preset || {};\nconst pkg = job.ai_package || {};\n\nconst isStory = format === 'story';\nconst targetAspect = isStory ? '9:16' : '4:5';\n\nconst textPoints = (pkg.on_screen_text && pkg.on_screen_text.length > 0)\n  ? pkg.on_screen_text\n  : [pkg.headline, pkg.experience_line, pkg.CTA].filter(Boolean);\n\nlet slideCount = 1;\nif (isStory) {\n  slideCount = Math.min(3, Math.max(1, textPoints.length));\n} else {\n  slideCount = Math.min(7, Math.max(3, textPoints.length));\n}\n\nconst slides = [];\nfor (let i = 0; i < slideCount; i++) {\n  let slideHeadline = '';\n  let slideBody = '';\n\n  if (i === 0) {\n    slideHeadline = pkg.headline || job.marketing_job;\n    slideBody = pkg.experience_line || textPoints[0] || '';\n  } else if (i === slideCount - 1) {\n    slideHeadline = textPoints[i] || 'Next Step';\n    slideBody = pkg.CTA || 'Visit us today';\n  } else {\n    slideHeadline = `Highlight ${i}`;\n    slideBody = textPoints[i] || '';\n  }\n\n  slides.push({\n    slide_number: i + 1,\n    total_slides: slideCount,\n    aspect_ratio: targetAspect,\n    headline: slideHeadline,\n    body_text: slideBody,\n    bg_color: preset.overlay_color || '#0D0F12',\n    accent_color: preset.accent_color || '#D4AF37',\n    text_color: preset.headline_color || '#FFFFFF',\n    pagination_indicator: `${i + 1}/${slideCount}`\n  });\n}\n\nconst width = isStory ? 1080 : 1080;\nconst height = isStory ? 1920 : 1350;\nconst heroSlide = slides[0];\n\nconst svgCover = `\n<svg width=\"${width}\" height=\"${height}\" xmlns=\"http://www.w3.org/2000/svg\">\n  <rect width=\"100%\" height=\"100%\" fill=\"${heroSlide.bg_color}\"/>\n  <rect x=\"80\" y=\"80\" width=\"${width - 160}\" height=\"${height - 160}\" rx=\"24\" fill=\"none\" stroke=\"${heroSlide.accent_color}\" stroke-width=\"4\" opacity=\"0.4\"/>\n  <text x=\"${width / 2}\" y=\"${height * 0.35}\" font-family=\"Arial, sans-serif\" font-size=\"36\" font-weight=\"bold\" fill=\"${heroSlide.accent_color}\" text-anchor=\"middle\" letter-spacing=\"4\">${(job.business_name || '').toUpperCase()}</text>\n  <text x=\"${width / 2}\" y=\"${height * 0.45}\" font-family=\"Arial, sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"${heroSlide.text_color}\" text-anchor=\"middle\">${heroSlide.headline.slice(0, 30)}</text>\n  <text x=\"${width / 2}\" y=\"${height * 0.55}\" font-family=\"Arial, sans-serif\" font-size=\"32\" fill=\"#CCCCCC\" text-anchor=\"middle\">${heroSlide.body_text.slice(0, 60)}</text>\n  <text x=\"${width / 2}\" y=\"${height * 0.85}\" font-family=\"Arial, sans-serif\" font-size=\"28\" fill=\"${heroSlide.accent_color}\" text-anchor=\"middle\">${heroSlide.pagination_indicator}</text>\n</svg>`;\n\nconst safeBiz = String(job.business_name || 'BIZ').replace(/[^a-zA-Z0-9]/g, '_');\nconst filename = `${safeBiz}_${isStory ? 'STORY' : 'CAROUSEL'}_COVER.svg`;\n\nreturn [{\n  json: {\n    ...job,\n    rendered_type: isStory ? 'STORY' : 'CAROUSEL',\n    media_format: 'svg',\n    slide_count: slideCount,\n    slides: slides,\n    rendered_filename: filename\n  },\n  binary: {\n    data: {\n      data: Buffer.from(svgCover).toString('base64'),\n      mimeType: 'image/svg+xml',\n      fileName: filename\n    }\n  }\n}];"
+      },
+      "id": "wf05-format-story-carousel",
+      "name": "Build Story & Carousel Slides",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 180]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf09-save-generated-draft",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf05-call-wf09",
+      "name": "Pass to WF-09 Save Draft & Send Approval",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [1820, 40]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "columnToMatchOn": "Marketing Job",
+        "valueToMatchOn": "={{ $json.marketing_job }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Production Status",
+              "fieldValue": "Revision Needed"
+            },
+            {
+              "fieldId": "Revision Notes",
+              "fieldValue": "Semantic duplicate detected against recent marketing history. Human review or creative adjustment required."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf05-flag-dup-sheet",
+      "name": "Flag Duplicate in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [440, 240],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf99-error-handler",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "wf05-call-wf99-dup",
+      "name": "Alert via WF-99",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [660, 240]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [{ "node": "Get Recent Creative History", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Recent Creative History": {
+      "main": [
+        [{ "node": "Get All Style Presets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get All Style Presets": {
+      "main": [
+        [{ "node": "Resolve Preset & Style Tokens", "type": "main", "index": 0 }]
+      ]
+    },
+    "Resolve Preset & Style Tokens": {
+      "main": [
+        [{ "node": "Build Creative Request Payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Creative Request Payload": {
+      "main": [
+        [{ "node": "OpenAI Structured Content API", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Structured Content API": {
+      "main": [
+        [{ "node": "Parse & Semantic Anti-Dup Gate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse & Semantic Anti-Dup Gate": {
+      "main": [
+        [{ "node": "IF No Semantic Duplication", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF No Semantic Duplication": {
+      "main": [
+        [{ "node": "Record in Creative History", "type": "main", "index": 0 }],
+        [{ "node": "Flag Duplicate in Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Record in Creative History": {
+      "main": [
+        [{ "node": "Write Recommended Date/Time to Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Write Recommended Date/Time to Sheet": {
+      "main": [
+        [{ "node": "Route by Content Format", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route by Content Format": {
+      "main": [
+        [{ "node": "Process Reel Video Asset", "type": "main", "index": 0 }],
+        [{ "node": "Prepare Static Image Prompt", "type": "main", "index": 0 }],
+        [{ "node": "Build Story & Carousel Slides", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Reel Video Asset": {
+      "main": [
+        [{ "node": "Pass to WF-09 Save Draft & Send Approval", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Static Image Prompt": {
+      "main": [
+        [{ "node": "OpenAI Image API Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Image API Request": {
+      "main": [
+        [{ "node": "Process Image Binary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Image Binary": {
+      "main": [
+        [{ "node": "Pass to WF-09 Save Draft & Send Approval", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Story & Carousel Slides": {
+      "main": [
+        [{ "node": "Pass to WF-09 Save Draft & Send Approval", "type": "main", "index": 0 }]
+      ]
+    },
+    "Flag Duplicate in Sheet": {
+      "main": [
+        [{ "node": "Alert via WF-99", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

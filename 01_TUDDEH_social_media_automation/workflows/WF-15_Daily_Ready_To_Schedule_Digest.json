@@ -1,0 +1,147 @@
+{
+  "name": "WF-15 Daily Ready-to-Schedule Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "wf15-trigger-cron",
+      "name": "Daily Morning Trigger (8:00 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-980, 100]
+    },
+    {
+      "parameters": {},
+      "id": "wf15-trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-980, -60]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_TRACKER_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Marketing Queue",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "wf15-read-queue",
+      "name": "Read Marketing Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-740, 40],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheetsOAuth2Api",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter items: Production Status = 'Ready to Schedule' AND Scheduling Status = 'Not Scheduled'\nconst rows = $input.all().map(i => i.json);\nconst candidates = rows.filter(r => {\n  const prod = String(r['Production Status'] || '').trim();\n  const sched = String(r['Scheduling Status'] || '').trim();\n  return prod === 'Ready to Schedule' && sched === 'Not Scheduled';\n});\n\nif (candidates.length === 0) {\n  return [{ json: { count: 0, has_items: false } }];\n}\n\nconst masterReadyFolderId = $env.DRIVE_05_01_READY_TO_SCHEDULE_FOLDER_ID || '05_01_READY_TO_SCHEDULE_MASTER_ID';\nconst masterFolderUrl = `https://drive.google.com/drive/folders/${masterReadyFolderId}`;\n\n// Build HTML table\nlet tableRows = '';\nfor (const c of candidates) {\n  const dt = `${c['Recommended Publish Date'] || 'TBD'} ${c['Recommended Publish Time'] || ''}`.trim();\n  tableRows += `\n  <tr style='border-bottom: 1px solid #30363d;'>\n    <td style='padding: 10px 14px;'><strong>${c.Business || ''}</strong></td>\n    <td style='padding: 10px 14px;'>${c['Marketing Job'] || c.Campaign || ''}</td>\n    <td style='padding: 10px 14px;'><span style='background:#21262d;color:#58a6ff;padding:3px 8px;border-radius:12px;font-size:12px;'>${c['Content Format'] || ''}</span></td>\n    <td style='padding: 10px 14px;'>📅 ${dt}</td>\n    <td style='padding: 10px 14px;'><a href='${c['Final Asset Link'] || masterFolderUrl}' target='_blank' style='color:#58a6ff;text-decoration:underline;'>Open Package</a></td>\n  </tr>`;\n}\n\nconst digestHtml = `\n<!DOCTYPE html>\n<html>\n<body style='font-family:-apple-system,sans-serif;background:#0d0f12;color:#f0f0f0;padding:24px;'>\n  <div style='max-width:720px;margin:0 auto;background:#161a22;border:1px solid #30363d;border-radius:12px;overflow:hidden;'>\n    <div style='background:#000;padding:20px 24px;border-bottom:2px solid #d4af37;'>\n      <h2 style='margin:0;color:#d4af37;'>TUDDEH Daily Ready-to-Schedule Digest</h2>\n      <p style='margin:4px 0 0;color:#8b949e;font-size:13px;'>The following ${candidates.length} item(s) are approved and awaiting manual scheduling.</p>\n    </div>\n    <div style='padding:20px 24px;'>\n      <table style='width:100%;border-collapse:collapse;font-size:14px;color:#c9d1d9;'>\n        <thead>\n          <tr style='background:#21262d;color:#8b949e;text-align:left;font-size:12px;text-transform:uppercase;'>\n            <th style='padding:8px 14px;'>Business</th>\n            <th style='padding:8px 14px;'>Job</th>\n            <th style='padding:8px 14px;'>Format</th>\n            <th style='padding:8px 14px;'>Recommended Time</th>\n            <th style='padding:8px 14px;'>Action</th>\n          </tr>\n        </thead>\n        <tbody>\n          ${tableRows}\n        </tbody>\n      </table>\n      <div style='margin-top:24px;text-align:center;'>\n        <a href='${masterFolderUrl}' target='_blank' style='display:inline-block;padding:12px 24px;background:#238636;color:#fff;border-radius:8px;font-weight:600;text-decoration:none;'>📂 Open Master 01 Ready to Schedule Folder</a>\n      </div>\n    </div>\n  </div>\n</body>\n</html>`;\n\nreturn [{\n  json: {\n    count: candidates.length,\n    has_items: true,\n    email_subject: `[TUDDEH DIGEST] ${candidates.length} Content Item(s) Ready to Schedule`,\n    email_html: digestHtml,\n    recipient: $env.TUDDEH_APPROVAL_EMAIL || 'team@tuddeh.com'\n  }\n}];"
+      },
+      "id": "wf15-build-digest",
+      "name": "Build Daily Digest Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, 40]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-has-items",
+              "leftValue": "={{ $json.has_items }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf15-if-has-items",
+      "name": "IF Items Ready (> 0)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-280, 40]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.recipient }}",
+        "subject": "={{ $json.email_subject }}",
+        "message": "={{ $json.email_html }}",
+        "options": {}
+      },
+      "id": "wf15-send-digest-email",
+      "name": "Send Digest Email (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [-60, -20],
+      "credentials": {
+        "gmailOAuth2Api": {
+          "id": "gmailOAuth2Api",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Zero items waiting to schedule. Silent termination as per spec.\nreturn [{\n  json: {\n    status: 'SILENT_EXIT',\n    message: 'Zero items in Ready to Schedule state. No email sent.'\n  }\n}];"
+      },
+      "id": "wf15-silent-exit",
+      "name": "Silent Exit (0 Items)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-60, 160]
+    }
+  ],
+  "connections": {
+    "Daily Morning Trigger (8:00 AM)": {
+      "main": [[{ "node": "Read Marketing Queue", "type": "main", "index": 0 }]]
+    },
+    "Manual Trigger": {
+      "main": [[{ "node": "Read Marketing Queue", "type": "main", "index": 0 }]]
+    },
+    "Read Marketing Queue": {
+      "main": [[{ "node": "Build Daily Digest Email", "type": "main", "index": 0 }]]
+    },
+    "Build Daily Digest Email": {
+      "main": [[{ "node": "IF Items Ready (> 0)", "type": "main", "index": 0 }]]
+    },
+    "IF Items Ready (> 0)": {
+      "main": [
+        [{ "node": "Send Digest Email (Gmail)", "type": "main", "index": 0 }],
+        [{ "node": "Silent Exit (0 Items)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

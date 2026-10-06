@@ -1,0 +1,19 @@
+============================================================
+TUDDEH READY-TO-SCHEDULE PACKAGE (HUMAN PUBLISHER INSTRUCTIONS)
+============================================================
+BUSINESS: Cafe Mirage
+MARKETING JOB: Tuesday 2-for-1 Espresso Deal
+RECOMMENDED TIME: 2026-09-29 at 08:15 AM
+DESTINATIONS: Instagram Reels & TikTok
+
+CAPTION (COPY/PASTE):
+Double the espresso, double the energy. Tag your coffee buddy and get 2-for-1 on all specialty drinks this Tuesday until 11 AM! ☕✨
+
+#CafeMirage #CoffeeDeal #EspressoTuesday #DowntownEats
+
+ACTION INSTRUCTIONS:
+1. Open Meta Business Suite / TikTok Scheduler.
+2. Upload 'final_ready_package.mp4'.
+3. Paste the caption above and set scheduled time.
+4. Update Google Sheet 'Marketing Queue' row Scheduling Status = 'Schedule Requested'.
+============================================================
