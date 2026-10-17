@@ -1,0 +1,211 @@
+{
+  "name": "WF1 \u2014 Website Content Gap Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 1 * * *"
+            }
+          ]
+        }
+      },
+      "id": "wf1-n1",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WORDPRESS_BASE_URL || 'https://common-law.ai'}}/wp-json/wp/v2/posts",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "per_page",
+              "value": "100"
+            },
+            {
+              "name": "status",
+              "value": "publish"
+            },
+            {
+              "name": "_fields",
+              "value": "id,title,link,slug,categories,tags"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf1-n2",
+      "name": "Fetch WordPress Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        220
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const posts = $input.all();\nconst extracted = posts.map(p => ({\n  id: p.json.id,\n  title: p.json.title?.rendered || p.json.title || '',\n  url: p.json.link || '',\n  slug: p.json.slug || '',\n  categories: p.json.categories || [],\n  tags: p.json.tags || []\n})).filter(p => p.title.length > 0);\n\nreturn [{\n  json: {\n    existingPosts: extracted,\n    totalCount: extracted.length,\n    titles: extracted.map(p => p.title.toLowerCase()),\n    slugs: extracted.map(p => p.slug)\n  }\n}];"
+      },
+      "id": "wf1-n3",
+      "name": "Extract Titles, URLs & Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 3000
+        },
+        "prompt": "=You are a legal content strategist for common-law.ai.\n\nExisting site articles ({{ $json.totalCount }} total):\n{{ JSON.stringify($json.titles.slice(0, 80)) }}\n\nAnalyze coverage across these core legal practice areas:\nFamily Law, Estate Planning, Business Law, Criminal Defense, Personal Injury,\nReal Estate Law, Employment Law, Immigration Law, Bankruptcy, Constitutional Rights.\n\nFor each practice area, identify the top 2 high-value missing legal topics that are NOT currently covered on the site.\n\nReturn ONLY valid JSON (no markdown):\n{\n  \"coverage_summary\": {\n    \"total_existing\": {{ $json.totalCount }},\n    \"covered_areas\": [\"Area 1\", \"Area 2\"],\n    \"gap_areas\": [\"Area 3\", \"Area 4\"]\n  },\n  \"content_gaps\": [\n    {\n      \"practice_area\": \"Family Law\",\n      \"missing_topics\": [\n        {\n          \"title\": \"Article title\",\n          \"keyword\": \"primary target keyword\",\n          \"target_state\": \"State or Federal\",\n          \"priority\": 8,\n          \"reason\": \"Why this is an essential gap to fill\"\n        }\n      ]\n    }\n  ]\n}"
+      },
+      "id": "wf1-n4",
+      "name": "Compare Against Target Legal Topics",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        660
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-commonlaw-creds",
+          "name": "OpenAI CommonLaw API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.message?.content || $json.text || '';\nlet data = {};\ntry {\n  const c = raw.replace(/```json/g,'').replace(/```/g,'').trim();\n  data = JSON.parse(c);\n} catch(e) {\n  throw new Error('Parse error in gap analysis: ' + e.message);\n}\n\nconst gaps = [];\n(data.content_gaps || []).forEach(area => {\n  (area.missing_topics || []).forEach(t => {\n    gaps.push({\n      practice_area: area.practice_area,\n      title: t.title,\n      keyword: t.keyword,\n      target_state: t.target_state || 'Federal',\n      priority: Number(t.priority) || 5,\n      reason: t.reason\n    });\n  });\n});\n\ngaps.sort((a, b) => b.priority - a.priority);\n\nreturn [{\n  json: {\n    coverageSummary: data.coverage_summary || {},\n    identifiedGaps: gaps,\n    gapCount: gaps.length\n  }\n}];"
+      },
+      "id": "wf1-n5",
+      "name": "Identify Covered Topics & Content Gaps",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ts = new Date().toISOString();\nconst gaps = $json.identifiedGaps || [];\n\nreturn [{\n  json: {\n    generated_at: ts,\n    source: 'WF1 Content Gap Analysis',\n    coverage_summary: $json.coverageSummary,\n    total_gaps_found: $json.gapCount,\n    top_opportunities: gaps.slice(0, 10).map((g, i) => ({\n      rank: i + 1,\n      practice_area: g.practice_area,\n      title: g.title,\n      primary_keyword: g.keyword,\n      target_state: g.target_state,\n      priority_score: g.priority,\n      gap_reason: g.reason\n    })),\n    all_gaps: gaps\n  }\n}];"
+      },
+      "id": "wf1-n6",
+      "name": "Build Structured Gap Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WF2_WEBHOOK_URL || 'http://localhost:5678/webhook/wf2-gap-report'}}",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "wf1-n7",
+      "name": "Send Report to WF2 Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        1320
+      ],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch WordPress Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch WordPress Posts": {
+      "main": [
+        [
+          {
+            "node": "Extract Titles, URLs & Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Titles, URLs & Content": {
+      "main": [
+        [
+          {
+            "node": "Compare Against Target Legal Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare Against Target Legal Topics": {
+      "main": [
+        [
+          {
+            "node": "Identify Covered Topics & Content Gaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify Covered Topics & Content Gaps": {
+      "main": [
+        [
+          {
+            "node": "Build Structured Gap Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Structured Gap Report": {
+      "main": [
+        [
+          {
+            "node": "Send Report to WF2 Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

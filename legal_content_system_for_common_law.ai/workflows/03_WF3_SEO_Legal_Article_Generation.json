@@ -1,0 +1,506 @@
+{
+  "name": "WF3 \u2014 SEO Legal Article Generation",
+  "nodes": [
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topic_Bank",
+          "mode": "name"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "field": "status",
+              "operator": "equals",
+              "value": "NEW"
+            }
+          ]
+        },
+        "options": {
+          "limit": 1
+        }
+      },
+      "id": "wf3-n1",
+      "name": "Select Approved Topic",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://www.courtlistener.com/api/rest/v3/opinions/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search",
+              "value": "={{$json.primary_keyword}}"
+            },
+            {
+              "name": "order_by",
+              "value": "score desc"
+            },
+            {
+              "name": "page_size",
+              "value": "5"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Token {{$env.COURTLISTENER_API_TOKEN}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf3-n2",
+      "name": "Research Reliable Legal Sources",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        220
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 2000
+        },
+        "prompt": "=You are a senior legal editor for common-law.ai.\n\nCreate a detailed article outline for:\n- Topic: \"{{ $('Select Approved Topic').item.json.title_idea }}\"\n- Primary Keyword: \"{{ $('Select Approved Topic').item.json.primary_keyword }}\"\n- Jurisdiction: {{ $('Select Approved Topic').item.json.target_state }}\n- Practice Area: {{ $('Select Approved Topic').item.json.practice_area }}\n\nVerified legal sources available:\n{{ JSON.stringify(($json.results || []).slice(0,3).map(r => ({case: r.caseName, url: r.absolute_url}))) }}\n\nReturn ONLY valid JSON:\n{\n  \"h1\": \"Main headline\",\n  \"introduction_angle\": \"Hook and legal context\",\n  \"sections\": [\n    {\"h2\": \"Section heading\", \"key_points\": [\"point 1\", \"point 2\"], \"h3_subsections\": [\"sub 1\"]}\n  ],\n  \"conclusion_points\": [\"takeaway 1\", \"takeaway 2\"],\n  \"word_count_target\": 1500\n}"
+      },
+      "id": "wf3-n3",
+      "name": "Create Article Outline",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        440
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-commonlaw-creds",
+          "name": "OpenAI CommonLaw API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.4,
+          "maxTokens": 5000
+        },
+        "prompt": "=You are an elite legal writer for common-law.ai.\n\nWrite a complete, authoritative legal article based on this outline:\n{{ $json.message?.content || $json.text }}\n\nTopic: \"{{ $('Select Approved Topic').item.json.title_idea }}\"\nKeyword: \"{{ $('Select Approved Topic').item.json.primary_keyword }}\"\nJurisdiction: {{ $('Select Approved Topic').item.json.target_state }}\nPractice Area: {{ $('Select Approved Topic').item.json.practice_area }}\n\nMANDATORY LEGAL ACCURACY & CITATION RULES:\n1. ONLY cite URLs from verified primary legal domains: law.cornell.edu, justia.com, courtlistener.com, federalregister.gov, uscourts.gov, congress.gov\n2. Mark any claim you cannot definitively source with: [UNVERIFIED \u2014 NEEDS REVIEW]\n3. NEVER invent case names, docket numbers, or statute section numbers\n4. Include every source you cited in the sources[] array\n\nReturn ONLY valid JSON:\n{\n  \"article_html\": \"Full HTML article using h2/h3/p/ul/ol/strong tags. Do NOT include an h1 tag.\",\n  \"sources\": [{\"title\": \"Official authority title\", \"url\": \"https://...\", \"cited_for\": \"rule of law\"}],\n  \"unverified_claims\": [\"Any claim marked as unverified\"]\n}"
+      },
+      "id": "wf3-n4",
+      "name": "Generate Article Draft",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        660
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-commonlaw-creds",
+          "name": "OpenAI CommonLaw API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.message?.content || $json.text || '';\nlet articleData = {};\ntry {\n  const c = raw.replace(/```json/g,'').replace(/```/g,'').trim();\n  articleData = JSON.parse(c);\n} catch(e) {\n  throw new Error('Article draft parse failed: ' + e.message);\n}\n\nconst allowedDomains = [\n  'law.cornell.edu', 'justia.com', 'courtlistener.com',\n  'federalregister.gov', 'uscourts.gov', 'supremecourt.gov',\n  'congress.gov', 'legis.state.*.us'\n];\n\nconst sources = articleData.sources || [];\nconst unverified = articleData.unverified_claims || [];\n\nconst hallucinated = sources.filter(s => {\n  try {\n    const host = new URL(s.url).hostname.replace('www.','');\n    return !allowedDomains.some(d => {\n      const regex = new RegExp(d.replace('*','[a-z]+'));\n      return regex.test(host);\n    });\n  } catch(e) {\n    return true;\n  }\n});\n\nconst needsReview = unverified.length > 0 || hallucinated.length > 0;\nconst topicData = $('Select Approved Topic').item.json;\n\nreturn [{\n  json: {\n    topicId: topicData.topic_id || topicData.id,\n    topicTitle: topicData.title_idea || topicData.title,\n    primaryKeyword: topicData.primary_keyword || topicData.keyword,\n    targetState: topicData.target_state,\n    practiceArea: topicData.practice_area,\n    articleHtml: articleData.article_html || '',\n    sources: sources,\n    unverifiedClaims: unverified,\n    hallucinatedCitations: hallucinated,\n    requiresHumanReview: needsReview,\n    reviewReason: needsReview\n      ? `${unverified.length} unverified claim(s), ${hallucinated.length} citation issue(s)`\n      : 'PASSED \u2014 All primary citations verified'\n  }\n}];"
+      },
+      "id": "wf3-n5",
+      "name": "Validate Facts and Citations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 2000
+        },
+        "prompt": "=You are an SEO director for common-law.ai.\n\nGenerate SEO metadata and 5 FAQ items for:\n- Topic: \"{{ $json.topicTitle }}\"\n- Primary Keyword: \"{{ $json.primaryKeyword }}\"\n- Jurisdiction: {{ $json.targetState }}\n- Practice Area: {{ $json.practiceArea }}\n\nReturn ONLY valid JSON:\n{\n  \"seo_title\": \"SEO title under 60 chars with keyword\",\n  \"meta_description\": \"Compelling meta description under 155 chars\",\n  \"slug\": \"url-friendly-slug\",\n  \"excerpt\": \"2-sentence executive summary\",\n  \"faq_items\": [\n    {\"question\": \"Common legal question?\", \"answer\": \"Clear, precise answer.\"}\n  ]\n}"
+      },
+      "id": "wf3-n6",
+      "name": "Generate SEO Metadata & FAQs",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        1100
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-commonlaw-creds",
+          "name": "OpenAI CommonLaw API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WORDPRESS_BASE_URL || 'https://common-law.ai'}}/wp-json/wp/v2/posts",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "per_page",
+              "value": "20"
+            },
+            {
+              "name": "status",
+              "value": "publish"
+            },
+            {
+              "name": "_fields",
+              "value": "id,title,link,slug"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf3-n7-fetch",
+      "name": "Fetch Site Posts for Linking",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        1320
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const validation = $('Validate Facts and Citations').item.json;\nconst seoRaw = $json.message?.content || $json.text || '';\nlet seoData = {};\ntry {\n  seoData = JSON.parse(seoRaw.replace(/```json/g,'').replace(/```/g,'').trim());\n} catch(e) {}\n\nconst livePosts = $('Fetch Site Posts for Linking').all().filter(p => p.json.id).map(p => ({\n  id: p.json.id,\n  title: p.json.title?.rendered || '',\n  url: p.json.link || '',\n  slug: p.json.slug || ''\n}));\n\nconst state = validation.targetState || 'your state';\nconst practice = validation.practiceArea || 'legal';\nconst baseUrl = process.env.WORDPRESS_BASE_URL || 'https://common-law.ai';\nconst ctaUrl = `${baseUrl}/attorneys/?state=${encodeURIComponent(state.toLowerCase())}&practice=${encodeURIComponent(practice.toLowerCase().replace(/\\s+/g,'-'))}`;\n\nconst related = livePosts.filter(p => {\n  const t = p.title.toLowerCase();\n  return t.includes(practice.toLowerCase()) || t.includes(state.toLowerCase());\n}).slice(0,3);\n\nconst relatedHtml = related.length > 0 ?\n  `<div class='commonlaw-related' style='margin:32px 0;padding:20px;background:#f8fafc;border-radius:8px;border-left:4px solid #3b82f6;'><h3>Related Legal Guides</h3><ul>${related.map(p=>`<li><a href='${p.url}'>${p.title}</a></li>`).join('')}</ul></div>` : '';\n\nconst ctaHtml = `<div class='commonlaw-cta' style='margin:40px 0;padding:28px;background:linear-gradient(135deg,#1e293b,#0f172a);border-radius:12px;color:#fff;text-align:center;'><h3 style='color:#f8fafc;font-size:22px;margin-bottom:8px;'>Need a ${state} ${practice} Attorney?</h3><p style='color:#cbd5e1;margin-bottom:20px;'>Browse verified attorneys in ${state} who specialize in ${practice}.</p><a href='${ctaUrl}' style='display:inline-block;background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;'>Find a ${state} Attorney &rarr;</a></div>`;\n\nconst disclaimerHtml = `<div class='commonlaw-disclaimer' style='margin-top:36px;padding:16px 20px;background:#f1f5f9;border-left:4px solid #64748b;font-size:13px;color:#475569;font-style:italic;'><strong>Legal Disclaimer:</strong> This article is for informational and educational purposes only and does not constitute formal legal advice. No attorney-client relationship is created by accessing this content. Always consult a qualified attorney licensed in your jurisdiction for guidance on specific legal matters.</div>`;\n\nconst sources = validation.sources || [];\nconst sourcesHtml = sources.length > 0 ?\n  `<div class='commonlaw-sources' style='margin-top:32px;border-top:1px solid #e2e8f0;padding-top:20px;'><h2>Sources &amp; References</h2><ul style='font-size:14px;'>${sources.map(s=>`<li><a href='${s.url}' target='_blank' rel='noopener nofollow'>${s.title}</a>${s.cited_for?' \u2014 '+s.cited_for:''}</li>`).join('')}</ul></div>` : '';\n\nconst faqItems = seoData.faq_items || [];\nconst faqHtml = faqItems.length > 0 ?\n  `<div class='commonlaw-faq' style='margin-top:36px;'><h2>Frequently Asked Questions</h2>${faqItems.map(f=>`<div style='margin-bottom:20px;'><h3>${f.question}</h3><p>${f.answer}</p></div>`).join('')}</div>` : '';\n\nconst articleSchema = {\n  '@context': 'https://schema.org',\n  '@type': 'Article',\n  'headline': seoData.seo_title || validation.topicTitle,\n  'description': seoData.meta_description || '',\n  'mainEntityOfPage': `${baseUrl}/${seoData.slug || 'legal-guide'}/`,\n  'author': {'@type': 'Organization', 'name': 'Common-Law.ai Editorial Team'},\n  'publisher': {'@type': 'Organization', 'name': 'Common-Law.ai', 'url': baseUrl},\n  'datePublished': new Date().toISOString().split('T')[0]\n};\n\nconst faqSchema = faqItems.length > 0 ? {\n  '@context': 'https://schema.org',\n  '@type': 'FAQPage',\n  'mainEntity': faqItems.map(f => ({\n    '@type': 'Question',\n    'name': f.question,\n    'acceptedAnswer': {'@type': 'Answer', 'text': f.answer}\n  }))\n} : null;\n\nconst fullHtml = [\n  validation.articleHtml,\n  relatedHtml, faqHtml, sourcesHtml, ctaHtml, disclaimerHtml,\n  `<script type='application/ld+json'>${JSON.stringify(articleSchema)}</script>`,\n  faqSchema ? `<script type='application/ld+json'>${JSON.stringify(faqSchema)}</script>` : ''\n].filter(Boolean).join('\\n');\n\nreturn [{\n  json: {\n    ...validation,\n    seoTitle: seoData.seo_title || validation.topicTitle,\n    metaDescription: seoData.meta_description || '',\n    slug: seoData.slug || (validation.topicTitle||'').toLowerCase().replace(/[^a-z0-9]+/g,'-'),\n    excerpt: seoData.excerpt || '',\n    faqItems: faqItems,\n    articleSchema,\n    faqSchema,\n    categories: [validation.targetState, validation.practiceArea].filter(Boolean),\n    tags: [validation.primaryKeyword, 'common law', validation.practiceArea, validation.targetState].filter(Boolean),\n    contentHtml: fullHtml,\n    imagePrompt: `Professional legal consultation in ${state}, modern law office, editorial photography, cinematic lighting, 1600x900, no text`,\n    imageAltText: `${validation.topicTitle} - Legal Guide`,\n    wpForceDraft: validation.requiresHumanReview\n  }\n}];"
+      },
+      "id": "wf3-n7",
+      "name": "Add Internal Links and Attorney CTA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1540
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "review-cond",
+              "leftValue": "={{$json.requiresHumanReview}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf3-n8",
+      "name": "Legal Review Required?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1760
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.SLACK_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL}}",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"text\":\"\ud83d\udea9 *WF3 Legal Review Required*\\n\\n*Topic:* {{ $json.topicTitle }}\\n*Reason:* {{ $json.reviewReason }}\\n\\nArticle will be saved as WordPress DRAFT pending human legal review.\"}",
+        "options": {}
+      },
+      "id": "wf3-n9",
+      "name": "Human Review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -300,
+        1980
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "topicId",
+              "value": "={{$json.topicId}}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "title",
+              "value": "={{$json.topicTitle}}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "seoTitle",
+              "value": "={{$json.seoTitle}}",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "metaDescription",
+              "value": "={{$json.metaDescription}}",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "slug",
+              "value": "={{$json.slug}}",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "excerpt",
+              "value": "={{$json.excerpt}}",
+              "type": "string"
+            },
+            {
+              "id": "a7",
+              "name": "contentHtml",
+              "value": "={{$json.contentHtml}}",
+              "type": "string"
+            },
+            {
+              "id": "a8",
+              "name": "categories",
+              "value": "={{$json.categories}}",
+              "type": "array"
+            },
+            {
+              "id": "a9",
+              "name": "tags",
+              "value": "={{$json.tags}}",
+              "type": "array"
+            },
+            {
+              "id": "a10",
+              "name": "imagePrompt",
+              "value": "={{$json.imagePrompt}}",
+              "type": "string"
+            },
+            {
+              "id": "a11",
+              "name": "imageAltText",
+              "value": "={{$json.imageAltText}}",
+              "type": "string"
+            },
+            {
+              "id": "a12",
+              "name": "wpForceDraft",
+              "value": "={{$json.wpForceDraft}}",
+              "type": "boolean"
+            },
+            {
+              "id": "a13",
+              "name": "primaryKeyword",
+              "value": "={{$json.primaryKeyword}}",
+              "type": "string"
+            },
+            {
+              "id": "a14",
+              "name": "targetState",
+              "value": "={{$json.targetState}}",
+              "type": "string"
+            },
+            {
+              "id": "a15",
+              "name": "practiceArea",
+              "value": "={{$json.practiceArea}}",
+              "type": "string"
+            },
+            {
+              "id": "a16",
+              "name": "requiresHumanReview",
+              "value": "={{$json.requiresHumanReview}}",
+              "type": "boolean"
+            },
+            {
+              "id": "a17",
+              "name": "reviewReason",
+              "value": "={{$json.reviewReason}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf3-n10",
+      "name": "Prepare WordPress Draft",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        2200
+      ]
+    }
+  ],
+  "connections": {
+    "Select Approved Topic": {
+      "main": [
+        [
+          {
+            "node": "Research Reliable Legal Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research Reliable Legal Sources": {
+      "main": [
+        [
+          {
+            "node": "Create Article Outline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Article Outline": {
+      "main": [
+        [
+          {
+            "node": "Generate Article Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Article Draft": {
+      "main": [
+        [
+          {
+            "node": "Validate Facts and Citations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Facts and Citations": {
+      "main": [
+        [
+          {
+            "node": "Generate SEO Metadata & FAQs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate SEO Metadata & FAQs": {
+      "main": [
+        [
+          {
+            "node": "Fetch Site Posts for Linking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Site Posts for Linking": {
+      "main": [
+        [
+          {
+            "node": "Add Internal Links and Attorney CTA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Internal Links and Attorney CTA": {
+      "main": [
+        [
+          {
+            "node": "Legal Review Required?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Legal Review Required?": {
+      "main": [
+        [
+          {
+            "node": "Human Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare WordPress Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Human Review": {
+      "main": [
+        [
+          {
+            "node": "Prepare WordPress Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

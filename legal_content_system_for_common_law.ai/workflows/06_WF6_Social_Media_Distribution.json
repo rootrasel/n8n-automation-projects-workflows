@@ -1,0 +1,295 @@
+{
+  "name": "WF6 \u2014 Social Media Distribution",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf6-published-article",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "wf6-n1",
+      "name": "Published Article Event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "wf6-published-article-webhook"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.WORDPRESS_BASE_URL || 'https://common-law.ai' }}/wp-json/wp/v2/posts/{{ $json.body?.wp_post_id || $json.wp_post_id }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "_fields",
+              "value": "id,title,link,slug,excerpt,featured_media"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf6-n2",
+      "name": "Fetch Title, URL and Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        220
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "temperature": 0.6,
+          "maxTokens": 1500
+        },
+        "prompt": "=You are a social media director for common-law.ai.\n\nGenerate tailored social copy for this published legal article:\n- Title: \"{{ $json.title?.rendered || $json.title }}\"\n- Excerpt: \"{{ $json.excerpt?.rendered?.replace(/<[^>]*>/g,'').trim().substring(0,200) }}\"\n- URL: {{ $json.link }}\n- Brand Voice: Authoritative, helpful, consumer-friendly, professional.\n\nReturn ONLY valid JSON:\n{\n  \"linkedin\": {\n    \"text\": \"Professional insight summary (max 600 chars) + URL + 3 relevant hashtags\"\n  },\n  \"twitter\": {\n    \"text\": \"Punchy legal insight hook + URL (max 250 chars total)\"\n  },\n  \"facebook\": {\n    \"text\": \"Conversational 2-paragraph overview (max 450 chars) + URL\"\n  },\n  \"bluesky\": {\n    \"text\": \"Engaging short post (max 280 chars) + URL\"\n  },\n  \"threads\": {\n    \"text\": \"Approachable legal guide angle (max 350 chars) + URL\"\n  }\n}"
+      },
+      "id": "wf6-n3",
+      "name": "Generate Platform-Specific Copy",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        440
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-commonlaw-creds",
+          "name": "OpenAI CommonLaw API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.SLACK_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL}}",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\\n  \"text\": \"\ud83d\udce2 *WF6 Social Distribution Dispatch*\\n\\n*Title:* {{ $(\"Fetch Title, URL and Image\").item.json.title?.rendered }}\\n*URL:* {{ $(\"Fetch Title, URL and Image\").item.json.link }}\\n\\nBroadcasting to configured channels: LinkedIn, X (Twitter), Facebook, Bluesky, Threads...\"\\n}",
+        "options": {}
+      },
+      "id": "wf6-n4",
+      "name": "Publish to Configured Channels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        660
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "success-cond",
+              "leftValue": "={{ $json.statusCode || 200 }}",
+              "rightValue": 400,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf6-n5",
+      "name": "All Posts Successful?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        0,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Publishing_Queue",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "social_status": "DISTRIBUTED",
+            "article_url": "={{ $('Fetch Title, URL and Image').item.json.link }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf6-n6a",
+      "name": "Record Social Post URLs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -300,
+        1100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Publishing_Queue",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "social_status": "FAILED",
+            "notes": "Social distribution failure. Manual retry queued."
+          }
+        },
+        "options": {}
+      },
+      "id": "wf6-n6b",
+      "name": "Log Failure and Queue Retry",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        300,
+        1100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"distribution_complete\",\"url\":\"{{ $(\"Fetch Title, URL and Image\").item.json.link }}\"}",
+        "options": {}
+      },
+      "id": "wf6-n7",
+      "name": "Update Distribution Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        1320
+      ]
+    }
+  ],
+  "connections": {
+    "Published Article Event": {
+      "main": [
+        [
+          {
+            "node": "Fetch Title, URL and Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Title, URL and Image": {
+      "main": [
+        [
+          {
+            "node": "Generate Platform-Specific Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Platform-Specific Copy": {
+      "main": [
+        [
+          {
+            "node": "Publish to Configured Channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to Configured Channels": {
+      "main": [
+        [
+          {
+            "node": "All Posts Successful?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All Posts Successful?": {
+      "main": [
+        [
+          {
+            "node": "Record Social Post URLs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Failure and Queue Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Social Post URLs": {
+      "main": [
+        [
+          {
+            "node": "Update Distribution Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Failure and Queue Retry": {
+      "main": [
+        [
+          {
+            "node": "Update Distribution Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

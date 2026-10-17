@@ -1,0 +1,360 @@
+{
+  "name": "WF2 \u2014 Legal Topic Research and Ranking",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf2-gap-report",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "wf2-n1",
+      "name": "Receive WF1 Gap Report",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "wf2-gap-report-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst gaps = body.all_gaps || body.top_opportunities || [];\nconst seen = new Set();\nconst normalized = gaps.filter(g => {\n  const key = (g.title || g.topic || '').toLowerCase().trim();\n  if (!key || seen.has(key)) return false;\n  seen.add(key);\n  return true;\n}).map((g, i) => ({\n  id: 'CAND-' + Date.now() + '-' + String(i+1).padStart(3,'0'),\n  title: g.title || g.topic,\n  keyword: g.keyword || g.primary_keyword || '',\n  practice_area: g.practice_area || 'General Law',\n  target_state: g.target_state || 'Federal',\n  priority: g.priority || g.priority_score || 5,\n  gap_reason: g.reason || g.gap_reason || ''\n}));\n\nreturn normalized.map(n => ({ json: n }));"
+      },
+      "id": "wf2-n2",
+      "name": "Normalize Topic Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://google.serper.dev/search",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-KEY",
+              "value": "={{$env.SERPER_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"q\": \"{{ $json.keyword }} site:law.cornell.edu OR site:justia.com OR legal guide\", \"num\": 5, \"gl\": \"us\", \"hl\": \"en\"}",
+        "options": {}
+      },
+      "id": "wf2-n3",
+      "name": "Search Google SERP Evidence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        440
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://www.courtlistener.com/api/rest/v3/opinions/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search",
+              "value": "={{$('Normalize Topic Candidates').item.json.keyword}}"
+            },
+            {
+              "name": "order_by",
+              "value": "score desc"
+            },
+            {
+              "name": "page_size",
+              "value": "3"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Token {{$env.COURTLISTENER_API_TOKEN}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf2-n4",
+      "name": "Research Competitors & Legal Sources",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        660
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 1500
+        },
+        "prompt": "=You are a legal research expert for common-law.ai.\n\nAnalyze this topic candidate:\n- Title: \"{{ $json.title }}\"\n- Keyword: \"{{ $json.keyword }}\"\n- Practice Area: {{ $json.practice_area }}\n- Target State: {{ $json.target_state }}\n\nDetermine:\n1. Primary jurisdiction (state, federal, or both)\n2. Search intent type (informational, navigational, commercial, transactional)\n3. Target audience (individuals, consumers, business owners)\n4. Key legal authorities relevant to this topic (general statutes, case law areas \u2014 do NOT invent citations)\n5. Competitor content angle (how top legal sites cover this)\n\nReturn ONLY valid JSON:\n{\n  \"jurisdiction\": \"state|federal|both\",\n  \"jurisdiction_detail\": \"{{ $json.target_state }}\",\n  \"search_intent\": \"informational|commercial|transactional\",\n  \"target_audience\": \"Description of searcher\",\n  \"legal_authority_areas\": [\"Relevant area 1\", \"Relevant area 2\"],\n  \"competitor_angle\": \"Summary of current competitor coverage\",\n  \"content_type_recommendation\": \"comprehensive guide|FAQ|explainer\"\n}"
+      },
+      "id": "wf2-n5",
+      "name": "Check Jurisdiction and Search Intent",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        880
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-commonlaw-creds",
+          "name": "OpenAI CommonLaw API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.dataforseo.com/v3/keywords_data/google/search_volume/live",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[{\"keywords\":[\"{{ $json.keyword }}\"]}]",
+        "options": {}
+      },
+      "id": "wf2-n6",
+      "name": "Collect Available SEO Metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        1100
+      ],
+      "continueOnFail": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "dataforseo-creds",
+          "name": "DataForSEO API Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 1500
+        },
+        "prompt": "=You are an editorial director for common-law.ai.\n\nScore and rank this legal topic for publication priority:\nTopic: \"{{ $json.title }}\"\nKeyword: \"{{ $json.keyword }}\"\nPractice Area: {{ $json.practice_area }}\nJurisdiction: {{ $json.jurisdiction_detail || $json.target_state }}\nSearch Intent: {{ $json.search_intent || 'informational' }}\nTarget Audience: {{ $json.target_audience || 'General public' }}\nCompetitor Angle: {{ $json.competitor_angle || 'Not analyzed' }}\n\nIMPORTANT LEGAL SAFEGUARD:\nDo NOT invent keyword search volume, difficulty scores, or rankings unless a real SEO provider supplied them.\n\nReturn ONLY valid JSON:\n{\n  \"content_score\": 85,\n  \"score_breakdown\": {\n    \"search_demand\": \"high|medium|low\",\n    \"competition\": \"high|medium|low\",\n    \"commercial_value\": \"high|medium|low\",\n    \"content_gap_urgency\": \"high|medium|low\"\n  },\n  \"recommendation\": \"publish|deprioritize|reject\",\n  \"editorial_notes\": \"Brief rationalization for score\",\n  \"suggested_article_type\": \"comprehensive guide|FAQ|state-specific guide\"\n}"
+      },
+      "id": "wf2-n7",
+      "name": "Score and Rank Topics",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        1320
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-commonlaw-creds",
+          "name": "OpenAI CommonLaw API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const scoreRaw = $json.message?.content || $json.text || '{}';\nlet scoreData = {};\ntry {\n  const c = scoreRaw.replace(/```json/g,'').replace(/```/g,'').trim();\n  scoreData = JSON.parse(c);\n} catch(e) {\n  scoreData = { content_score: 50, recommendation: 'review', editorial_notes: 'Score parse fallback' };\n}\n\nconst input = $('Normalize Topic Candidates').item.json;\nconst jurisRaw = $('Check Jurisdiction and Search Intent').item.json.message?.content ||\n                 $('Check Jurisdiction and Search Intent').item.json.text || '{}';\nlet jurisData = {};\ntry {\n  jurisData = JSON.parse(jurisRaw.replace(/```json/g,'').replace(/```/g,'').trim());\n} catch(e) {}\n\nconst isValid = scoreData.recommendation !== 'reject' && (scoreData.content_score || 50) >= 50;\nconst ts = new Date().toISOString();\n\nreturn [{\n  json: {\n    topic_id: input.id,\n    title_idea: input.title,\n    primary_keyword: input.keyword,\n    practice_area: input.practice_area,\n    target_state: jurisData.jurisdiction_detail || input.target_state,\n    jurisdiction: jurisData.jurisdiction || 'state',\n    search_intent: jurisData.search_intent || 'informational',\n    content_score: scoreData.content_score || 50,\n    score_breakdown: scoreData.score_breakdown || {},\n    recommendation: scoreData.recommendation || 'review',\n    editorial_notes: scoreData.editorial_notes || '',\n    suggested_article_type: scoreData.suggested_article_type || 'comprehensive guide',\n    status: isValid ? 'NEW' : 'REJECTED',\n    source_type: 'wf2_research',\n    relevance_score: scoreData.content_score || 50,\n    notes: [input.gap_reason, scoreData.editorial_notes].filter(Boolean).join(' | '),\n    created_at: ts,\n    is_valid: isValid\n  }\n}];"
+      },
+      "id": "wf2-n8",
+      "name": "Validate Research Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1540
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topic_Bank",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "topic_id": "={{$json.topic_id}}",
+            "title_idea": "={{$json.title_idea}}",
+            "primary_keyword": "={{$json.primary_keyword}}",
+            "target_state": "={{$json.target_state}}",
+            "practice_area": "={{$json.practice_area}}",
+            "source_type": "={{$json.source_type}}",
+            "relevance_score": "={{$json.relevance_score}}",
+            "status": "={{$json.status}}",
+            "notes": "={{$json.notes}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf2-n9",
+      "name": "Editorial Queue / Database",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        1760
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', topics_queued: $input.all().length }) }}",
+        "options": {}
+      },
+      "id": "wf2-n10",
+      "name": "Return WF2 Research Report",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        1980
+      ]
+    }
+  ],
+  "connections": {
+    "Receive WF1 Gap Report": {
+      "main": [
+        [
+          {
+            "node": "Normalize Topic Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Topic Candidates": {
+      "main": [
+        [
+          {
+            "node": "Search Google SERP Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Google SERP Evidence": {
+      "main": [
+        [
+          {
+            "node": "Research Competitors & Legal Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research Competitors & Legal Sources": {
+      "main": [
+        [
+          {
+            "node": "Check Jurisdiction and Search Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Jurisdiction and Search Intent": {
+      "main": [
+        [
+          {
+            "node": "Collect Available SEO Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Available SEO Metrics": {
+      "main": [
+        [
+          {
+            "node": "Score and Rank Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score and Rank Topics": {
+      "main": [
+        [
+          {
+            "node": "Validate Research Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Research Results": {
+      "main": [
+        [
+          {
+            "node": "Editorial Queue / Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editorial Queue / Database": {
+      "main": [
+        [
+          {
+            "node": "Return WF2 Research Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -2,125 +2,80 @@
 
 A production-ready, autonomous n8n automation ecosystem engineered for **common-law.ai**.
 
-The system automates the entire legal content lifecycle:
+The system automates the complete legal content pipeline across 7 modular, decoupled workflows:
 ```text
-Legal Research & Signals (08:00 AM)
-           │
-           ▼
-AI Scoring & Topic Ranking (1–100) ──────► Google Sheets (Topic_Bank)
-                                                    │
-                                                    ▼
-Strategic Feedback Loop ◄──────────────── Topic Ingestion & Outline Engine
-          │                                         │
-          ▼                                         ▼
-Content Gap Audit (01:00 AM)             Full AI Legal Article Generation
-          │                              (H2/H3, FAQ, Rank Math SEO, JSON-LD)
-          ▼                                         │
-State x Practice Gap Matrix                         ▼
-                                         DALL-E 3 Featured Image (16:9 1600x900)
-                                         & WordPress Media Upload
-                                                    │
-                                                    ▼
-                                         Dynamic Directory CTA & Internal Links
-                                         (Targeted or Fallback "Get Matched")
-                                                    │
-                                                    ▼
-                                         WordPress REST API Publishing (Rank Math)
-                                                    │
-                                                    ▼
-                                         Scheduled 1/Day Publishing Queue
-                                                    │
-                                                    ▼
-                                         Multi-Channel Social Syndication
-                                         (Facebook, LinkedIn, X, Bluesky, Threads)
+Common-Law.ai Website & SEO Data
+             │
+             ▼
+WF1 — Website Content Gap Analysis (01:00 AM Cron)
+             │
+             ▼ (Structured JSON Gap Report via Webhook)
+WF2 — Legal Topic Research & Ranking
+             │ (SERP Evidence, CourtListener Authority, Intent Analysis)
+             ▼
+Google Sheets Master Database (Topic_Bank)
+             │
+             ▼ (Select Approved Topic)
+WF3 — SEO Legal Article Generation
+             │ (Outline, Synthesis, Citation Whitelist, Schema.org, Attorney CTA)
+             ▼
+Legal Safeguard Review (Passed vs Requires Human Review Alert)
+             │
+             ▼
+WF4 — AI Featured Image & WordPress Draft
+             │ (DALL-E 3 16:9, Media Library Upload, Rank Math Meta Sync)
+             ▼
+Google Sheets Publishing Queue (Publishing_Queue)
+             │
+             ▼ (Daily 09:00 AM Cron)
+WF5 — Scheduled Publishing
+             │ (Approval Check, WP REST Status -> Publish, HTTP 200 Verification)
+             ▼
+WF6 — Social Media Distribution
+             │ (LinkedIn, X / Twitter, Facebook, Bluesky, Threads)
+             ▼
+Public Channels & Status Tracking (DISTRIBUTED)
+
+─────────────────────────────────────────────────────────────────────────────
+* WF7 (Monitoring, Logging & Error Handling) acts as the global n8n Error Trigger,
+  logging incidents to Execution_Logs, retrying transient errors, and alerting team.
 ```
 
 ---
 
-## Workflows Included
+## The 7 Production Workflows
 
-All workflows are located in the [`workflows/`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/) directory:
+All workflow definitions are located in [`workflows/`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/workflows/):
 
-| Workflow File | Name | Trigger | Core Functionality |
-| :--- | :--- | :--- | :--- |
-| [`00_CommonLaw_Master_Orchestrator.json`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/00_CommonLaw_Master_Orchestrator.json) | Master Production Orchestrator | Daily 08:00 AM / Manual | Sequentially coordinates research, generation, queue verification, and syndication. |
-| [`01_Legal_Topic_Research_and_Ranking.json`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/01_Legal_Topic_Research_and_Ranking.json) | Legal Topic Research & Ranking | Cron 08:00 AM / Manual | Scrapes legal news RSS, court rulings, search volume signals, AI legal developments; scores topics (1–100); appends to Google Sheets `Topic_Bank`. |
-| [`02_SEO_Article_and_Schema_Generation.json`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/02_SEO_Article_and_Schema_Generation.json) | AI Article, SEO & Schema Generator | Sub-workflow / Manual | Synthesizes full legal guides, H1/H2/H3 hierarchy, FAQ section, JSON-LD Schema (Article + FAQPage), Rank Math metadata, and legal disclaimers. |
-| [`03_DALL-E_Featured_Image_Generator.json`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/03_DALL-E_Featured_Image_Generator.json) | Featured Image Generator | Sub-workflow | Generates 1600×900 editorial featured images with DALL-E 3, downloads binary, uploads directly to WordPress Media Library (`/wp/v2/media`), and sets alt text. |
-| [`04_WordPress_REST_Publisher_RankMath.json`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/04_WordPress_REST_Publisher_RankMath.json) | WP REST Publisher & Rank Math Sync | Sub-workflow | Publishes/schedules posts via WordPress REST API with embedded Rank Math SEO meta fields, categories, tags, and featured media. Updates Google Sheets status. |
-| [`05_Scheduled_Publishing_Queue_Manager.json`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/05_Scheduled_Publishing_Queue_Manager.json) | Scheduled Publishing Queue Manager | Daily 09:00 AM / Manual | Maintains the 1-article-per-day buffer queue, checks newly live posts on WordPress, and triggers social distribution. |
-| [`06_MultiChannel_Social_Syndication.json`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/06_MultiChannel_Social_Syndication.json) | Multi-Channel Social Syndication | Webhook / Sub-workflow | Generates tailored copy and broadcasts to **Facebook Pages**, **LinkedIn**, **X (Twitter)**, **Bluesky**, and **Threads** with link back to article. Isolated branches with error-resilience. |
-| [`07_Dynamic_Attorney_Directory_CTA_and_Internal_Links.json`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/07_Dynamic_Attorney_Directory_CTA_and_Internal_Links.json) | Dynamic Attorney CTA & Links Resolver | Sub-workflow | Matches target state & practice area against live directory. Emits personalized CTA banner if attorneys exist, or fallback "Get Matched" widget. Resolves internal linking. |
-| [`09_Nightly_Content_Gap_Analysis.json`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/09_Nightly_Content_Gap_Analysis.json) | Nightly Site Content Gap Engine | Cron 01:00 AM / Manual | Audits all live WordPress posts across US States × Practice Areas matrix, discovers deficits, prompts AI to formulate gap-closing topics, and pushes into `Topic_Bank`. |
-| [`99_Global_Error_Handler.json`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/workflows/99_Global_Error_Handler.json) | Centralized Error Logger & Alert | Error Trigger | Traps execution errors across any node and posts rich embed alerts to Discord/Slack webhooks. |
+| # | Workflow File | Trigger | Core Functionality |
+| :-: | :--- | :--- | :--- |
+| **01** | [`01_WF1_Website_Content_Gap_Analysis.json`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/workflows/01_WF1_Website_Content_Gap_Analysis.json) | Cron (01:00 AM) | Audits existing WordPress articles across legal practice areas and US jurisdictions, discovers deficits, builds structured gap report, and posts to WF2 webhook. |
+| **02** | [`02_WF2_Legal_Topic_Research_and_Ranking.json`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/workflows/02_WF2_Legal_Topic_Research_and_Ranking.json) | Webhook (`/wf2-gap-report`) | Normalizes candidates, queries Serper & CourtListener, evaluates search intent & jurisdiction, scores priority (1–100), and appends vetted records to `Topic_Bank`. |
+| **03** | [`03_WF3_SEO_Legal_Article_Generation.json`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/workflows/03_WF3_SEO_Legal_Article_Generation.json) | Editorial Ingestion / Manual | Researches legal authorities, drafts full article, verifies citations against primary court/statutory domains, generates Rank Math SEO metadata, injects dynamic attorney directory CTAs and Schema.org JSON-LD, flags unverified claims for review. |
+| **04** | [`04_WF4_AI_Featured_Image_and_WordPress_Draft.json`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/workflows/04_WF4_AI_Featured_Image_and_WordPress_Draft.json) | Sub-workflow Trigger | Generates photorealistic editorial image via DALL-E 3 (1792×1024, text-free), uploads binary to WP Media Library, creates WordPress draft via REST API with Rank Math custom meta, and logs to `Publishing_Queue`. |
+| **05** | [`05_WF5_Scheduled_Publishing.json`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/workflows/05_WF5_Scheduled_Publishing.json) | Cron (09:00 AM) | Fetches due articles from `Publishing_Queue`, validates approvals, sets post status to `publish`, verifies live HTTP 200 URL, updates database, and triggers WF6. |
+| **06** | [`06_WF6_Social_Media_Distribution.json`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/workflows/06_WF6_Social_Media_Distribution.json) | Webhook (`/wf6-published-article`) | Generates tailored copy for LinkedIn, X (Twitter), Facebook, Bluesky, and Threads, syndicates updates, and records distribution status in `Publishing_Queue`. |
+| **07** | [`07_WF7_Monitoring_Logging_and_Error_Handling.json`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/workflows/07_WF7_Monitoring_Logging_and_Error_Handling.json) | Error Trigger | Global error catcher for all workflows. Logs execution context to `Execution_Logs`, applies exponential backoff on transient errors (429, 502, timeouts), and dispatches urgent alerts to Slack/Discord if manual recovery is required. |
 
 ---
 
-## Data Schema & Google Sheets Templates
+## Master Database & Google Sheets Templates
 
-Templates are provided in [`google_sheets_templates/`](file:///home/softvence/Projects/n8n-automation-projects/legal_content_system_for_common_law.ai/google_sheets_templates/):
+Templates are provided in [`google_sheets_templates/`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/google_sheets_templates/):
 
-1. **`Topic_Bank.csv`**: Contains researched legal ideas, primary keywords, target jurisdictions, practice areas, scores, and status lifecycle (`NEW` → `PUBLISHED`).
-2. **`Publishing_Queue.csv`**: Manages the post queue, WordPress post IDs, live URLs, scheduled publish dates, and social distribution tracking (`PENDING` → `DISTRIBUTED`).
-3. **`Directory_Lookup.csv`**: Maps state codes, state names, practice areas, and dynamic directory filter URLs, with active attorney flags and fallback URLs.
-
----
-
-## Required Environment Variables & Credentials in n8n
-
-### Environment Variables
-Configure these in your n8n environment (`.env` or Docker container settings):
-```env
-# Core WordPress
-WORDPRESS_BASE_URL=https://common-law.ai
-WORDPRESS_AUTHOR_ID=1
-WORDPRESS_DEFAULT_POST_STATUS=publish
-
-# Google Sheets
-GOOGLE_SHEETS_SPREADSHEET_ID=your_google_spreadsheet_id_here
-
-# Social Integrations
-FACEBOOK_PAGE_ID=your_facebook_page_id
-LINKEDIN_ORG_ID=your_linkedin_company_id
-BLUESKY_HANDLE=common-law.bsky.social
-THREADS_USER_ID=your_threads_account_id
-
-# Incident Notifications
-ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/...
-```
-
-### Credentials Configured in Workflows
-1. **OpenAI API Key (`openAiApi`)**: Needs access to `gpt-4o`, `gpt-4o-mini`, and `dall-e-3`.
-2. **Google Sheets OAuth2 / Service Account (`googleSheetsOAuth2Api`)**: Read/write access to your master spreadsheet.
-3. **WordPress Basic Auth / Application Password (`httpBasicAuth`)**:
-   - Username: Your WordPress user.
-   - Password: An **Application Password** generated under `Users -> Profile`.
-   - **Crucial Note**: The user MUST be assigned the **Editor** or **Administrator** role. Standard "Author" roles lack permission to assign custom post meta (Rank Math) or manage all media items.
-4. **Social API Tokens**:
-   - Facebook Page Access Token (Header Auth).
-   - LinkedIn OAuth Bearer Token (Header Auth).
-   - Twitter / X API v2 Bearer Token (Header Auth).
-   - Bluesky App Access JWT (Header Auth).
-   - Threads User Access Token (Header Auth).
+1. **`Topic_Bank.csv`**: Researched legal topics, primary keywords, target jurisdictions, practice areas, editorial scores, and status lifecycle (`NEW` → `PUBLISHED`).
+2. **`Publishing_Queue.csv`**: Post queue management, WordPress post IDs, live URLs, scheduled publish dates, and social syndication tracking (`PENDING` → `DISTRIBUTED`).
+3. **`Directory_Lookup.csv`**: State codes, practice areas, custom directory URLs, and dynamic CTA copy.
+4. **`Execution_Logs.csv`**: System audit trail, error logging, and retry queue tracking.
 
 ---
 
-## Setup & Deployment Instructions
+## Detailed Documentation Suite
 
-1. **Import Workflows into n8n**:
-   - Open your n8n dashboard.
-   - Go to **Workflows -> Import from File** and select each JSON file from the `workflows/` directory.
-2. **Create the Google Spreadsheet**:
-   - Create a Google Spreadsheet named `Common-Law Content Database`.
-   - Create three sheets named:
-     - `Topic_Bank`
-     - `Publishing_Queue`
-     - `Directory_Lookup`
-   - Import or paste the headers and starter rows from `google_sheets_templates/`.
-3. **Configure Rank Math in WordPress**:
-   - Ensure the **Rank Math SEO** plugin is active.
-   - Verify that REST API exposure is active (Rank Math natively saves `rank_math_title`, `rank_math_description`, and `rank_math_focus_keyword` in post meta).
-4. **Test Run**:
-   - Execute `WF-01` manually to populate `Topic_Bank`.
-   - Execute `WF-02` manually to generate an article, featured image, dynamic CTA, and publish to WordPress.
-   - Verify that the post appears on common-law.ai with complete Rank Math metadata, structured FAQ accordion, and 16:9 featured image.
+Complete documentation is organized in [`docs/`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/docs/):
+- [`docs/01_ARCHITECTURE_AND_MERMAID_DIAGRAMS.md`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/docs/01_ARCHITECTURE_AND_MERMAID_DIAGRAMS.md): Full Mermaid diagram architecture and individual diagrams for WF1–WF7.
+- [`docs/02_DATABASE_AND_SHEETS_SCHEMA.md`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/docs/02_DATABASE_AND_SHEETS_SCHEMA.md): Complete field-by-field schema for all 4 tables.
+- [`docs/03_CREDENTIALS_AND_ENV_CHECKLIST.md`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/docs/03_CREDENTIALS_AND_ENV_CHECKLIST.md): Checklist of all API keys, OAuth tokens, and environment variables.
+- [`docs/04_SETUP_AND_CONNECTION_GUIDE.md`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/docs/04_SETUP_AND_CONNECTION_GUIDE.md): Step-by-step import, credential binding, and webhook connection instructions.
+- [`docs/05_TEST_CASES_AND_VALIDATION.md`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/docs/05_TEST_CASES_AND_VALIDATION.md): 12 end-to-end test cases covering success, missing data, and failure paths.
+- [`docs/06_DEPLOYMENT_AND_MAINTENANCE.md`](file:///home/softvence/Projects_Hub/n8n-automation-projects-workflows/legal_content_system_for_common_law.ai/docs/06_DEPLOYMENT_AND_MAINTENANCE.md): Production scheduling, quotas, troubleshooting, and maintenance routines.

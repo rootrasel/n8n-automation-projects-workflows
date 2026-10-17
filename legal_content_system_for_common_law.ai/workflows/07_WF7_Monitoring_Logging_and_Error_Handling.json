@@ -1,0 +1,329 @@
+{
+  "name": "WF7 \u2014 Monitoring, Logging and Error Handling",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf7-n1",
+      "name": "Workflow Execution",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const execData = $json;\nconst ts = new Date().toISOString();\nconst isError = !!execData.error || execData.mode === 'error';\n\nreturn [{\n  json: {\n    execution_id: execData.execution?.id || execData.id || ('EXEC-' + Date.now()),\n    workflow_id: execData.workflowId || execData.workflow?.id || 'unknown',\n    workflow_name: execData.workflowName || execData.workflow?.name || 'unknown',\n    status: isError ? 'ERROR' : 'SUCCESS',\n    error_message: execData.error?.message || '',\n    error_node: execData.error?.node?.name || '',\n    error_type: execData.error?.type || '',\n    recorded_at: ts,\n    is_error: isError,\n    retry_count: Number(execData.retryCount || 0)\n  }\n}];"
+      },
+      "id": "wf7-n2",
+      "name": "Record Status, IDs and Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Execution_Logs",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "execution_id": "={{$json.execution_id}}",
+            "workflow_id": "={{$json.workflow_id}}",
+            "workflow_name": "={{$json.workflow_name}}",
+            "status": "={{$json.status}}",
+            "error_message": "={{$json.error_message}}",
+            "error_node": "={{$json.error_node}}",
+            "recorded_at": "={{$json.recorded_at}}",
+            "retry_count": "={{$json.retry_count}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf7-n2b",
+      "name": "Log to Execution Logs Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        440
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "success-cond",
+              "leftValue": "={{$json.is_error}}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf7-n3",
+      "name": "Execution Successful?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        0,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Execution_Logs",
+          "mode": "name"
+        },
+        "matchingColumn": "execution_id",
+        "matchingValue": "={{$json.execution_id}}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "SUCCESS"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf7-n4a",
+      "name": "Update Pipeline Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -300,
+        880
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $json;\nconst errorType = (data.error_type || data.error_message || '').toLowerCase();\nconst isTransient = ['etimedout','econnreset','enotfound','429','503','502','timeout'].some(t => errorType.includes(t));\n\nreturn [{\n  json: {\n    ...data,\n    is_transient: isTransient,\n    can_retry: isTransient && data.retry_count < 3,\n    retry_delay_ms: Math.pow(2, data.retry_count) * 1000,\n    max_retries_reached: data.retry_count >= 3,\n    captured_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "wf7-n4b",
+      "name": "Capture Error Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "retry-cond",
+              "leftValue": "={{$json.can_retry}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf7-n5",
+      "name": "Retry Transient Failures",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        300,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.SLACK_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL}}",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\\n  \"text\": \"\ud83d\udea8 *WF7 \u2014 Manual Intervention Required*\\n\\n*Workflow:* {{ $json.workflow_name }}\\n*Error:* {{ $json.error_message }}\\n*Node:* {{ $json.error_node }}\\n*Retries exhausted:* {{ $json.retry_count }}/3\\n\\nPlease inspect the Execution Logs sheet and recover the run.\"\\n}",
+        "options": {}
+      },
+      "id": "wf7-n6a",
+      "name": "Alert Administrator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        1320
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Execution_Logs",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "execution_id": "={{$json.execution_id}}",
+            "status": "MANUAL_REQUIRED",
+            "error_message": "={{$json.error_message}}",
+            "error_node": "={{$json.error_node}}",
+            "retry_count": "={{$json.retry_count}}",
+            "recorded_at": "={{ new Date().toISOString() }}",
+            "notes": "Max retries reached. Requires manual intervention."
+          }
+        },
+        "options": {}
+      },
+      "id": "wf7-n6b",
+      "name": "Manual Recovery Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        500,
+        1540
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Workflow Execution": {
+      "main": [
+        [
+          {
+            "node": "Record Status, IDs and Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Status, IDs and Results": {
+      "main": [
+        [
+          {
+            "node": "Log to Execution Logs Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Execution Logs Sheet": {
+      "main": [
+        [
+          {
+            "node": "Execution Successful?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execution Successful?": {
+      "main": [
+        [
+          {
+            "node": "Update Pipeline Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Capture Error Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capture Error Details": {
+      "main": [
+        [
+          {
+            "node": "Retry Transient Failures",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Transient Failures": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Alert Administrator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Administrator": {
+      "main": [
+        [
+          {
+            "node": "Manual Recovery Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

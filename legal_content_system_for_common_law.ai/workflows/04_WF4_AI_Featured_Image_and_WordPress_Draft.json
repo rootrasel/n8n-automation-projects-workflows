@@ -1,0 +1,315 @@
+{
+  "name": "WF4 \u2014 AI Featured Image and WordPress Draft",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf4-n1",
+      "name": "Approved Article Content",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const article = $json;\nconst basePrompt = article.imagePrompt ||\n  `Professional legal setting in ${article.targetState || 'the United States'}, modern law office or courtroom, editorial photography style, cinematic lighting, no visible text or signs, photorealistic, ultra-detailed, 16:9 aspect`;\nconst safePrompt = basePrompt.substring(0, 900);\n\nreturn [{ json: { ...article, finalImagePrompt: safePrompt } }];"
+      },
+      "id": "wf4-n2",
+      "name": "Create Image Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/images/generations",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"dall-e-3\",\"prompt\":\"{{ $json.finalImagePrompt }}\",\"n\":1,\"size\":\"1792x1024\",\"quality\":\"standard\",\"response_format\":\"url\"}",
+        "options": {}
+      },
+      "id": "wf4-n3",
+      "name": "Generate Featured Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        440
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "openai-bearer-token-creds",
+          "name": "OpenAI Bearer Auth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const imageData = $json.data?.[0];\nif (!imageData || !imageData.url) {\n  throw new Error('DALL-E returned no image URL');\n}\nconst imageUrl = imageData.url;\nif (!imageUrl.startsWith('https://')) {\n  throw new Error('Invalid image URL: ' + imageUrl);\n}\nconst articleData = $('Create Image Prompt').item.json;\nreturn [{ json: { ...articleData, generatedImageUrl: imageUrl, imageValid: true } }];"
+      },
+      "id": "wf4-n4",
+      "name": "Validate Image",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.generatedImageUrl }}",
+        "responseFormat": "file",
+        "options": {}
+      },
+      "id": "wf4-n4b",
+      "name": "Download Image Binary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WORDPRESS_BASE_URL || 'https://common-law.ai'}}/wp-json/wp/v2/media",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Disposition",
+              "value": "=attachment; filename=\"{{ $('Create Image Prompt').item.json.slug }}-featured.png\""
+            },
+            {
+              "name": "Content-Type",
+              "value": "image/png"
+            },
+            {
+              "name": "X-WP-Alt-Text",
+              "value": "={{ $('Create Image Prompt').item.json.imageAltText }}"
+            }
+          ]
+        },
+        "sendBinaryData": true,
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "wf4-n5",
+      "name": "Upload Image to WordPress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        1100
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "wordpress-app-password-creds",
+          "name": "WordPress Application Password CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WORDPRESS_BASE_URL || 'https://common-law.ai'}}/wp-json/wp/v2/posts",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\\n  \"title\": \"{{ $(\"Approved Article Content\").item.json.title }}\",\\n  \"content\": \"{{ $(\"Approved Article Content\").item.json.contentHtml }}\",\\n  \"slug\": \"{{ $(\"Approved Article Content\").item.json.slug }}\",\\n  \"excerpt\": \"{{ $(\"Approved Article Content\").item.json.excerpt }}\",\\n  \"status\": \"{{ $(\"Approved Article Content\").item.json.wpForceDraft ? 'draft' : ($env.WORDPRESS_DEFAULT_POST_STATUS || 'draft') }}\",\\n  \"featured_media\": {{ $json.id || 0 }},\\n  \"comment_status\": \"closed\",\\n  \"ping_status\": \"closed\",\\n  \"meta\": {\\n    \"rank_math_title\": \"{{ $(\"Approved Article Content\").item.json.seoTitle }}\",\\n    \"rank_math_description\": \"{{ $(\"Approved Article Content\").item.json.metaDescription }}\",\\n    \"rank_math_focus_keyword\": \"{{ $(\"Approved Article Content\").item.json.primaryKeyword }}\",\\n    \"rank_math_robots\": [\"index\",\"follow\"]\\n  }\\n}",
+        "options": {}
+      },
+      "id": "wf4-n6",
+      "name": "Create WordPress Draft via REST API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        1320
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "wordpress-app-password-creds",
+          "name": "WordPress Application Password CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WORDPRESS_BASE_URL || 'https://common-law.ai'}}/wp-json/wp/v2/posts/{{ $json.id }}",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\\n  \"featured_media\": {{ $(\"Upload Image to WordPress\").item.json.id || 0 }},\\n  \"categories\": {{ JSON.stringify($(\"Approved Article Content\").item.json.categories || []) }},\\n  \"tags\": {{ JSON.stringify($(\"Approved Article Content\").item.json.tags || []) }}\\n}",
+        "options": {}
+      },
+      "id": "wf4-n7",
+      "name": "Set Featured Image and Taxonomy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        1540
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "wordpress-app-password-creds",
+          "name": "WordPress Application Password CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Publishing_Queue",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "queue_id": "=QUEUE-{{ $('Create WordPress Draft via REST API').item.json.id }}",
+            "topic_id": "={{ $('Approved Article Content').item.json.topicId }}",
+            "wp_post_id": "={{ $('Create WordPress Draft via REST API').item.json.id }}",
+            "article_title": "={{ $('Create WordPress Draft via REST API').item.json.title?.rendered }}",
+            "slug": "={{ $('Create WordPress Draft via REST API').item.json.slug }}",
+            "wp_status": "={{ $('Create WordPress Draft via REST API').item.json.status }}",
+            "social_status": "PENDING",
+            "article_url": "={{ $('Create WordPress Draft via REST API').item.json.link }}",
+            "featured_image_url": "={{ $('Upload Image to WordPress').item.json.source_url || '' }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf4-n8",
+      "name": "Save Post ID and Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        1760
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Approved Article Content": {
+      "main": [
+        [
+          {
+            "node": "Create Image Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Image Prompt": {
+      "main": [
+        [
+          {
+            "node": "Generate Featured Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Featured Image": {
+      "main": [
+        [
+          {
+            "node": "Validate Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Image": {
+      "main": [
+        [
+          {
+            "node": "Download Image Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image Binary": {
+      "main": [
+        [
+          {
+            "node": "Upload Image to WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Image to WordPress": {
+      "main": [
+        [
+          {
+            "node": "Create WordPress Draft via REST API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create WordPress Draft via REST API": {
+      "main": [
+        [
+          {
+            "node": "Set Featured Image and Taxonomy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Featured Image and Taxonomy": {
+      "main": [
+        [
+          {
+            "node": "Save Post ID and Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,332 @@
+{
+  "name": "WF5 \u2014 Scheduled Publishing",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "wf5-n1",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Publishing_Queue",
+          "mode": "name"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "field": "wp_status",
+              "operator": "equals",
+              "value": "draft"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf5-n2",
+      "name": "Fetch Due Articles",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        220
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst now = new Date();\nconst readyItems = [];\nconst blockedItems = [];\n\nitems.forEach(item => {\n  const row = item.json;\n  const scheduled = row.scheduled_publish_time ? new Date(row.scheduled_publish_time) : null;\n  const isDue = !scheduled || scheduled <= now;\n  const hasPostId = !!row.wp_post_id;\n  const hasTitle = !!row.article_title;\n  const isApproved = row.wp_status === 'draft' || row.wp_status === 'future';\n  const isReady = isDue && hasPostId && hasTitle && isApproved;\n\n  if (isReady) {\n    readyItems.push({ json: { ...row, publish_ready: true, check_passed_at: now.toISOString() } });\n  } else {\n    blockedItems.push({ json: { ...row, publish_ready: false,\n      block_reason: !hasPostId ? 'missing wp_post_id' : !isDue ? 'not yet due' : !isApproved ? 'not in draft/future status' : 'missing required fields' } });\n  }\n});\n\nreturn [...readyItems, ...blockedItems.map(b => ({ json: { ...b.json, _blocked: true } }))];"
+      },
+      "id": "wf5-n3",
+      "name": "Check Approval and Required Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "ready-cond",
+              "leftValue": "={{$json.publish_ready}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "wf5-n4",
+      "name": "Ready to Publish?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        0,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Publishing_Queue",
+          "mode": "name"
+        },
+        "matchingColumn": "queue_id",
+        "matchingValue": "={{ $json.queue_id }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "social_status": "BLOCKED",
+            "notes": "={{ $json.block_reason }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf5-n5a",
+      "name": "Keep Queued and Flag Issue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -300,
+        880
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WORDPRESS_BASE_URL || 'https://common-law.ai'}}/wp-json/wp/v2/posts/{{ $json.wp_post_id }}",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"status\": \"publish\", \"date\": \"{{ new Date().toISOString() }}\"}",
+        "options": {}
+      },
+      "id": "wf5-n5b",
+      "name": "Publish or Verify WordPress Schedule",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        880
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "wordpress-app-password-creds",
+          "name": "WordPress Application Password CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.link || ($env.WORDPRESS_BASE_URL + '/?p=' + $json.id) }}",
+        "options": {}
+      },
+      "id": "wf5-n6",
+      "name": "Verify Published URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        1100
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Publishing_Queue",
+          "mode": "name"
+        },
+        "matchingColumn": "wp_post_id",
+        "matchingValue": "={{ $('Publish or Verify WordPress Schedule').item.json.id }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "wp_status": "publish",
+            "social_status": "PENDING",
+            "article_url": "={{ $('Publish or Verify WordPress Schedule').item.json.link }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf5-n7",
+      "name": "Record Publication Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        300,
+        1320
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googlesheets-commonlaw-creds",
+          "name": "Google Sheets OAuth CommonLaw"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.WF6_WEBHOOK_URL || 'http://localhost:5678/webhook/wf6-published-article'}}",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"wp_post_id\": {{ $(\"Publish or Verify WordPress Schedule\").item.json.id }}, \"link\": \"{{ $(\"Publish or Verify WordPress Schedule\").item.json.link }}\"}",
+        "options": {}
+      },
+      "id": "wf5-n8",
+      "name": "Trigger WF6",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        1540
+      ],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Due Articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Due Articles": {
+      "main": [
+        [
+          {
+            "node": "Check Approval and Required Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Approval and Required Fields": {
+      "main": [
+        [
+          {
+            "node": "Ready to Publish?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ready to Publish?": {
+      "main": [
+        [
+          {
+            "node": "Publish or Verify WordPress Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Keep Queued and Flag Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish or Verify WordPress Schedule": {
+      "main": [
+        [
+          {
+            "node": "Verify Published URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Published URL": {
+      "main": [
+        [
+          {
+            "node": "Record Publication Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Publication Status": {
+      "main": [
+        [
+          {
+            "node": "Trigger WF6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

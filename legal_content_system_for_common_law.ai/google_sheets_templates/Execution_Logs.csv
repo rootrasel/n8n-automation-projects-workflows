@@ -1,0 +1,8 @@
+execution_id,workflow_id,workflow_name,status,error_message,error_node,recorded_at,retry_count,notes
+EXEC-1729060000-001,wf01-content-gap,WF1 — Website Content Gap Analysis,SUCCESS,,,2026-10-16T01:05:00Z,0,Nightly gap analysis completed successfully. 14 new gaps identified.
+EXEC-1729060000-002,wf02-topic-ranking,WF2 — Legal Topic Research and Ranking,SUCCESS,,,2026-10-16T01:10:00Z,0,Ranked 10 legal topics and appended to Topic_Bank.
+EXEC-1729060000-003,wf03-article-gen,WF3 — SEO Legal Article Generation,SUCCESS,,,2026-10-16T08:00:00Z,0,Generated draft. 0 unverified claims. Passed legal citation verification.
+EXEC-1729060000-004,wf04-image-draft,WF4 — AI Featured Image and WordPress Draft,SUCCESS,,,2026-10-16T08:05:00Z,0,DALL-E 3 image uploaded. WordPress post ID 103 created as draft.
+EXEC-1729060000-005,wf05-scheduled-pub,WF5 — Scheduled Publishing,SUCCESS,,,2026-10-16T09:00:00Z,0,Published post ID 101 to live site. Verified HTTP 200.
+EXEC-1729060000-006,wf06-social-media,WF6 — Social Media Distribution,ERROR,Rate limit exceeded on LinkedIn API,Publish to Configured Channels,2026-10-16T09:02:15Z,1,Transient HTTP 429. Queued exponential backoff retry.
+EXEC-1729060000-007,wf06-social-media,WF6 — Social Media Distribution,MANUAL_REQUIRED,Max retries reached on Twitter API (403 Forbidden),Publish to Configured Channels,2026-10-16T09:15:00Z,3,Max retries reached. Requires manual intervention.
